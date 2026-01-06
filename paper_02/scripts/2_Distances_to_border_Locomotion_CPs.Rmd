@@ -1,0 +1,1346 @@
+---
+title: "Distance from locomotion CPs to to borders"
+author: "Felipe Bufalo"
+date: "2023-05-22"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("/Users/febufalo/Library/CloudStorage/GoogleDrive-felipe.bufalo@unesp.br/My Drive/Unesp/Mestrado/Analises/Analises_Publication/CPT_Guarei-Taquara-Suzano/CP_distance to border")
+```
+
+# Script to calculate distances from CP points associated to locomotion to the borders of both 95% akde home ranges and core areas (70-75% akde)
+
+## Load packages
+```{r}
+library(sf)
+library(nngeo)
+library(ggplot2)
+library(maptools)
+library(ggspatial)
+```
+
+# *Guareí!*
+## Read and treat files (shapes and data frame)
+```{r}
+# Read files
+guarei_akde95 <- st_read("guarei_akde95.gpkg")
+plot(guarei_akde95)
+# convert a polygon geometry to a data frame
+guarei_akde95 <- st_coordinates(guarei_akde95)
+# Convert to data frame
+guarei_akde95 <- as.data.frame(guarei_akde95)
+head(guarei_akde95)
+# Rename the columns
+colnames(guarei_akde95) <- c("x", "y")
+head(guarei_akde95)
+
+guarei_akde70 <- st_read("guarei_akde70.gpkg")
+plot(guarei_akde70)
+# convert a polygon geometry to a data frame
+guarei_akde70 <- st_coordinates(guarei_akde70)
+# Convert to data frame
+guarei_akde70 <- as.data.frame(guarei_akde70)
+head(guarei_akde70)
+# Rename the columns
+colnames(guarei_akde70) <- c("x", "y")
+head(guarei_akde70)
+
+df_cp_guarei <- read.csv("CP_distanceborder_guarei.csv")
+head(df_cp_guarei)
+```
+
+## Filter lines just to have locomotion cps (the ones I want to calculate distance to the borders)
+```{r}
+df_cp_guarei <- df_cp_guarei[df_cp_guarei$CP_q6 == "Locomotion", ]
+head(df_cp_guarei)
+```
+
+## Plot the data to have a look at the situation
+```{r}
+ggplot()+
+  geom_polygon(data = guarei_akde95, aes(x=x, y= y),
+               fill = "palegreen4", size = 1)+
+  geom_polygon(data = guarei_akde70, aes(x=x, y= y),
+               fill = "yellowgreen", colour = "black") +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, size=2))+
+  geom_point(data = df_cp_guarei, aes(x = longitude_x_GAL, 
+                                      y = latitude_y_GAL), size = 1) +
+  coord_fixed()+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=2),
+        plot.margin=unit(c(0.1,0,0,0),"cm"))+
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5, 
+                                   size = 8, colour ="Black"))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_continuous(expand = c(0, 0)) +
+  annotation_scale(location = "tr", width_hint = 0.2, 
+                   pad_x = unit(0.1, "in"), pad_y = unit(0.8, "in"))+
+  annotation_north_arrow(location = "tr", which_north = "true", 
+                         pad_x = unit(0.3, "in"), pad_y = unit(0.1, "in"),
+                         style = north_arrow_fancy_orienteering)
+```
+
+## Some more data organization
+```{r}
+colnames(df_cp_guarei) <- c("date", "time", "y", "x", "behav", "cp_q6")
+guarei_akde95[,3:4] <- NULL; head(guarei_akde95)
+guarei_akde70[,3:4] <- NULL; head(guarei_akde70)
+```
+
+## Determine the crs for the sf objects!
+```{r}
+crs <- st_crs("+proj=utm +zone=22 +south +datum=WGS84 +units=m +no_defs")
+```
+
+## Convert all objects to sf class
+```{r}
+# Convert guarei_akde95 data frame to an sf object
+guarei_akde95_sf <- st_as_sf(guarei_akde95, coords = c("x", "y"), crs = crs)
+
+# Convert guarei_akde70 data frame to an sf object
+guarei_akde70_sf <- st_as_sf(guarei_akde70, coords = c("x", "y"), crs = crs)
+
+# Convert df_cp_guarei data frame to an sf object
+df_cp_guarei_sf <- st_as_sf(df_cp_guarei, coords = c("x", "y"), crs = crs)
+```
+
+## Use the st_nn function (package nngeo) to calculate the distance between the locomotion CP and the nearest point in the borders. 
+## First 95% AKDE border
+```{r}
+# k = 1 for finding 1 nearest neighbor
+distances_95 <- nngeo::st_nn(df_cp_guarei_sf, guarei_akde95_sf, k = 1, 
+                             returnDist = T)
+head(distances_95)
+```
+
+## Than 70% AKDE border
+```{r}
+distances_70 <- nngeo::st_nn(df_cp_guarei_sf, guarei_akde70_sf, k = 1, 
+                             returnDist = T)
+head(distances_70)
+```
+
+## Extract the distance values from the list
+```{r}
+distance_values_95 <- distances_95$dist
+distance_values_70 <- distances_70$dist
+```
+
+## Add the distance values as a new column in df_cp_guarei
+```{r}
+df_cp_guarei$dist70 <- distance_values_70
+df_cp_guarei$dist95 <- distance_values_95
+df_cp_guarei$dist95 <- as.numeric(df_cp_guarei$dist95)
+df_cp_guarei$dist70 <- as.numeric(df_cp_guarei$dist70)
+head(df_cp_guarei)
+```
+
+## Now, for the plots, I will classify the distances into categories so I can compare frequency proportions of locomotion CPs between distance categories!
+```{r}
+breaks <- c(0, 20, 40, 60, 80, 100, 120, 140, 160)
+```
+
+## Create the distance categories
+```{r}
+dist_categories_guarei <- cut(df_cp_guarei$dist95, breaks = breaks, 
+                              labels = FALSE, include.lowest = TRUE, 
+                              right = FALSE)
+```
+
+## Rename the category labels
+```{r}
+category_labels <- paste0("cat", 1:length(breaks[-1]))
+```
+
+## Assign category labels to the distance categories
+```{r}
+dist_categories_guarei <- factor(dist_categories_guarei, 
+                                 levels = 1:length(breaks[-1]), 
+                                 labels = category_labels)
+df_cp_guarei$cat_dist_95 <- dist_categories_guarei
+df_cp_guarei
+```
+
+## Compute the frequency of each category
+```{r}
+freq_table_guarei95 <- table(dist_categories_guarei)
+```
+
+## Compute the proportion of location points for each distance category
+```{r}
+proportions_guarei95 <- freq_table_guarei95 / sum(freq_table_guarei95)
+plot_data_guarei95 <- data.frame(Proportion = proportions_guarei95,
+                                 Count = freq_table_guarei95)
+```
+## Add row names as a separate column
+```{r}
+plot_data_guarei95$Category <- row.names(plot_data_guarei95)
+```
+
+## Organize rows & columns
+```{r}
+row.names(plot_data_guarei95) <- NULL
+plot_data_guarei95$Proportion.dist_categories_guarei <- NULL
+plot_data_guarei95$Count.dist_categories_guarei <- NULL
+colnames(plot_data_guarei95) <- c("Proportion", "Count", "Category")
+plot_data_guarei95 <- plot_data_guarei95[, c("Category", "Count", "Proportion")]
+plot_data_guarei95$Category <- as.numeric(plot_data_guarei95$Category)
+plot_data_guarei95
+```
+
+## Convert Category column to numeric, with the distances they represent
+```{r}
+plot_data_guarei95$Category <- as.numeric(c(0, 20, 40, 60, 80, 100, 120, 
+                                            140))
+plot_data_guarei95
+```
+## Plot the proportion of location points by distance category to the 95% AKDE border
+```{r}
+ggplot(plot_data_guarei95, aes(x = Category, y = Proportion, group = 1)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Distance to AKDE 95% border (m)") +
+  ylab("Proportion of Locomotion CPs") +
+  scale_y_continuous(expand = c(0.05, 0)) +
+  scale_x_continuous(breaks = seq(0, 740, by = 20)) +
+  ggtitle("Guareí")
+```
+
+## I will try some tests to see if there is any relationship
+## Kolmogorov-Smirnov test
+```{r}
+ks.test(df_cp_guarei$dist95, "punif", min = 0, max = max(df_cp_guarei$dist95))
+# As expected from the plot, the distribution is not different from a unirform 
+# distribution!
+```
+
+## Generalized Linear model (poisson distribution)
+```{r}
+glm_guarei_95 <- glm(Count ~  Category, data = plot_data_guarei95,
+                     family = "poisson")
+summary(glm_guarei_95)
+# No interaction!
+```
+
+## *Now, work with the 70% - Core area*
+
+## Create the custom breaks for categories 95%
+```{r}
+breaks <- c(0, 20, 40, 60, 80, 100)
+```
+
+## Create the distance categories
+```{r}
+dist_categories_guarei <- cut(df_cp_guarei$dist70, breaks = breaks, 
+                              labels = FALSE, include.lowest = TRUE, 
+                              right = FALSE)
+```
+
+## Rename the category labels
+```{r}
+category_labels_guarei_70 <- paste0("cat", 1:length(breaks[-1]))
+```
+
+## Assign category labels to the distance categories
+```{r}
+dist_categories_guarei <- category_labels_guarei_70[dist_categories_guarei]
+category_labels_guarei_70 <- paste0("cat", 1:length(unique(
+  dist_categories_guarei)))
+df_cp_guarei$cat_dist_70 <- factor(dist_categories_guarei, 
+                                   levels = unique(dist_categories_guarei), 
+                                   labels = category_labels_guarei_70)
+df_cp_guarei
+```
+
+## Compute frequencies for each category
+```{r}
+freq_table_guarei70 <- table(dist_categories_guarei)
+```
+
+## Compute the proportion of location points for each distance category
+```{r}
+proportions_guarei70 <- freq_table_guarei70 / sum(freq_table_guarei70)
+
+plot_data_guarei70 <- data.frame(Proportion = proportions_guarei70,
+                                 Count = freq_table_guarei70)
+```
+
+## Organize rows & columns
+```{r}
+plot_data_guarei70$Category <- row.names(plot_data_guarei70)
+# Reset row names
+row.names(plot_data_guarei70) <- NULL
+plot_data_guarei70$Proportion.dist_categories_guarei <- NULL
+plot_data_guarei70$Count.dist_categories_guarei <- NULL
+# Change the column names of the data frame
+colnames(plot_data_guarei70) <- c("Proportion", "Count", "Category")
+plot_data_guarei70 <- plot_data_guarei70[, c("Category", "Count", "Proportion")]
+plot_data_guarei70$Category <- as.numeric(plot_data_guarei70$Category)
+plot_data_guarei70$Category <- as.numeric(c(0, 40, 60, 80))
+plot_data_guarei70
+```
+
+## Plot the proportion of location points by distance category
+```{r}
+ggplot(plot_data_guarei70, aes(x = Category, y = Proportion, group = 1)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Distance to AKDE 70% border (m)") +
+  ylab("Proportion of Locomotion CPs") +
+  scale_y_continuous(expand = c(0.05, 0)) +
+  scale_x_continuous(breaks = seq(0, 80, by = 20)) +
+  ggtitle("Guareí")
+```
+
+## I will try some tests to see if there is any relationship
+## Kolmogorov-Smirnov test
+```{r}
+ks.test(df_cp_guarei$dist70, "punif", min = 0, max = max(df_cp_guarei$dist70))
+# As expected from the plot, the distribution is not different from a unirform 
+# distribution!
+```
+
+## Generalized Linear model (poisson distribution)
+```{r}
+glm_guarei_70 <- glm(Count ~  Category, data = plot_data_guarei70, 
+                    family = "poisson")
+summary(glm_guarei_70)
+# As expected, does not work
+```
+
+
+# *Taquara!*
+## Read files
+```{r}
+taquara_akde95 <- st_read("taquara_akde95.gpkg")
+plot(taquara_akde95)
+# convert a polygon geometry to a data frame
+taquara_akde95 <- st_coordinates(taquara_akde95)
+# Convert to data frame
+taquara_akde95 <- as.data.frame(taquara_akde95)
+head(taquara_akde95)
+# Rename the columns
+colnames(taquara_akde95) <- c("x", "y")
+head(taquara_akde95)
+taquara_akde75 <- st_read("taquara_akde75.gpkg")
+plot(taquara_akde75)
+# convert a polygon geometry to a data frame
+taquara_akde75 <- st_coordinates(taquara_akde75)
+# Convert to data frame
+taquara_akde75 <- as.data.frame(taquara_akde75)
+head(taquara_akde75)
+# Rename the columns
+colnames(taquara_akde75) <- c("x", "y")
+head(taquara_akde75)
+df_cp_taquara <- read.csv("CP_distanceborder_taquara.csv")
+head(df_cp_taquara)
+```
+## Filter lines just to have locomotion cps (the ones I want to calculate distance to the borders)
+```{r}
+df_cp_taquara <- df_cp_taquara[df_cp_taquara$cp_q5 == "Locomotion", ]
+head(df_cp_taquara)
+```
+
+## Plot the data to understand the distribution of the CPs
+```{r}
+ggplot()+
+  geom_polygon(data = taquara_akde95, aes(x=x, y= y),
+               fill = "palegreen4", size = 1)+
+  geom_polygon(data = taquara_akde75, aes(x=x, y= y),
+               fill = "yellowgreen", colour = "black") +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, size=2))+
+  geom_point(data = df_cp_taquara, aes(x = longitude_x_GAL, 
+                                       y = latitude_y_GAL), size = 1) +
+  coord_fixed()+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=2),
+        plot.margin=unit(c(0.1,0,0,0),"cm"))+
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5, 
+                                   size = 8, colour ="Black"))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_continuous(expand = c(0, 0)) +
+  annotation_scale(location = "tr", width_hint = 0.2, 
+                   pad_x = unit(0.1, "in"), pad_y = unit(0.8, "in"))+
+  annotation_north_arrow(location = "tr", which_north = "true", 
+                         pad_x = unit(0.3, "in"), pad_y = unit(0.1, "in"),
+                         style = north_arrow_fancy_orienteering)
+```
+
+## Some more data organization
+```{r}
+colnames(df_cp_taquara) <- c("date", "time", "y", "x", "behav", "cp_q5")
+taquara_akde95[,3:4] <- NULL; head(taquara_akde95)
+taquara_akde75[,3:4] <- NULL; head(taquara_akde75)
+```
+
+## Convert data frames into sf objects
+```{r}
+# Convert taquara_akde95 data frame to an sf object
+taquara_akde95_sf <- st_as_sf(taquara_akde95, coords = c("x", "y"), crs = crs)
+# Convert taquara_akde70 data frame to an sf object
+taquara_akde75_sf <- st_as_sf(taquara_akde75, coords = c("x", "y"), crs = crs)
+# Convert df_cp_taquara data frame to an sf object
+df_cp_taquara_sf <- st_as_sf(df_cp_taquara, coords = c("x", "y"), crs = crs)
+```
+
+## Use the st_nn function (package nngeo) to calculate the distance between the locomotion CP and the nearest point in the borders. 
+## First 95% AKDE border
+```{r}
+# k = 1 for finding 1 nearest neighbor
+distances_95_taquara <- nngeo::st_nn(df_cp_taquara_sf, 
+                                     taquara_akde95_sf, k = 1, returnDist = T)
+head(distances_95_taquara)
+```
+
+## Now the 75% core area
+```{r}
+distances_75_taquara <- nngeo::st_nn(df_cp_taquara_sf, 
+                                     taquara_akde75_sf, k = 1, returnDist = T)
+head(distances_75_taquara)
+```
+
+## Extract the distance values from the list
+```{r}
+distance_values_95_taquara <- distances_95_taquara$dist
+distance_values_75_taquara <- distances_75_taquara$dist
+```
+
+## Add the distance values as a new column in df_cp_taquara_sf
+```{r}
+df_cp_taquara$dist75 <- distance_values_75_taquara
+df_cp_taquara$dist95 <- distance_values_95_taquara
+df_cp_taquara$dist95 <- as.numeric(df_cp_taquara$dist95)
+df_cp_taquara$dist75 <- as.numeric(df_cp_taquara$dist75)
+head(df_cp_taquara)
+```
+
+## Now, for the plots, I will classify the distances into categories so I can compare frequency proportions of locomotion CPs between distance categories! 
+## 95% AKDE first
+```{r}
+breaks <- c(0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240, 
+            260, 280, 300, 320, 340, 360, 380, 400, 420, 460, 480, 500, 520, 
+            540, 560, 580,600, 620, 640, 660, 680, 700, 720, 740, 760)
+```
+
+## Create the distance categories
+```{r}
+dist_categories_taquara <- cut(df_cp_taquara$dist95, breaks = breaks, 
+                               labels = FALSE, include.lowest = TRUE, 
+                               right = FALSE)
+# Rename the category labels
+category_labels <- paste0("cat", 1:length(breaks[-1]))
+```
+
+## Assign category labels to the distance categories
+```{r}
+dist_categories_taquara <- factor(dist_categories_taquara, 
+                                  levels = 1:length(breaks[-1]), 
+                                  labels = category_labels)
+df_cp_taquara$cat_dist_95 <- dist_categories_taquara
+df_cp_taquara
+```
+
+## Compute the frequency of points in each category
+```{r}
+freq_table_taquara95 <- table(dist_categories_taquara)
+```
+
+## Compute the proportion of location points for each distance category
+```{r}
+proportions_taquara95 <- freq_table_taquara95 / sum(freq_table_taquara95)
+plot_data_taquara95 <- data.frame(Proportion = proportions_taquara95,
+                                  Count = freq_table_taquara95)
+```
+
+## Add row names as a separate column
+```{r}
+plot_data_taquara95$Category <- row.names(plot_data_taquara95)
+```
+
+## Columns and rows organization
+```{r}
+row.names(plot_data_taquara95) <- NULL
+plot_data_taquara95$Proportion.dist_categories_taquara <- NULL
+plot_data_taquara95$Count.dist_categories_taquara <- NULL
+# Change the column names of the data frame
+colnames(plot_data_taquara95) <- c("Proportion", "Count", "Category")
+plot_data_taquara95 <- plot_data_taquara95[, c("Category", "Count", 
+                                               "Proportion")]
+plot_data_taquara95$Category <- as.numeric(plot_data_taquara95$Category)
+plot_data_taquara95
+```
+
+## Convert Category column to numeric, with the distances they represent
+```{r}
+plot_data_taquara95$Category <- as.numeric(c(0, 20, 40, 60, 80, 100, 120, 140, 
+                                             160, 180, 200, 220, 240, 260, 280, 
+                                             300, 320, 340, 360, 380, 400, 420, 
+                                             460, 480, 500, 520, 540, 560, 580,
+                                             600, 620, 640, 660, 680, 700, 720,
+                                             740))
+
+plot_data_taquara95
+```
+
+## Plot the proportion of location points by distance category
+```{r}
+ggplot(plot_data_taquara95, aes(x = Category, y = Proportion, group = 1)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Distance to AKDE 95% border (m)") +
+  ylab("Proportion of Locomotion CPs") +
+  scale_y_continuous(expand = c(0.05, 0)) +
+  scale_x_continuous(breaks = seq(0, 740, by = 20))+
+  ggtitle("Taquara")
+```
+
+## I will try some tests to see if there is any relationship
+## Kolmogorov-Smirnov test
+```{r}
+ks.test(df_cp_taquara$dist95, "punif", min = 0, max = max(df_cp_taquara$dist95))
+# Distribution is not different from a unirform distribution (p>0.05)
+```
+
+## Generealized Linear model (poisson distribution)
+```{r}
+glm_taquara_95 <- glm(Count ~  Category, data = plot_data_taquara95, 
+                      family = "poisson")
+summary(glm_taquara_95)
+# No correlation
+```
+
+# *Taquara 70% AKDE - Core area*
+## Create the custom breaks for categories
+```{r}
+breaks <- c(0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240, 260, 280,
+            300, 320, 340, 360, 380, 400, 420, 460, 480, 500, 520, 540)
+```
+
+## Create the distance categories
+```{r}
+dist_categories_taquara75 <- cut(df_cp_taquara$dist75, breaks = breaks, 
+                                 labels = FALSE, include.lowest = TRUE, 
+                                 right = FALSE)
+```
+
+## Rename the category labels
+```{r}
+category_labels <- paste0("cat", 1:length(breaks[-1]))
+```
+
+## Assign category labels to the distance categories
+```{r}
+dist_categories_taquara75 <- factor(dist_categories_taquara75, 
+                                    levels = 1:length(breaks[-1]), 
+                                    labels = category_labels)
+df_cp_taquara$cat_dist_75 <- dist_categories_taquara75
+df_cp_taquara
+```
+## Compute frequencies of points per distance category
+```{r}
+freq_table_taquara75 <- table(dist_categories_taquara75)
+```
+## Compute the proportion of location points for each distance category
+```{r}
+proportions_taquara75 <- freq_table_taquara75 / sum(freq_table_taquara75)
+plot_data_taquara75 <- data.frame(Proportion = proportions_taquara75,
+                                  Count = freq_table_taquara75)
+```
+
+## Rows and columns organization
+```{r}
+plot_data_taquara75$Category <- row.names(plot_data_taquara75)
+# Reset row names
+row.names(plot_data_taquara75) <- NULL
+plot_data_taquara75$Proportion.dist_categories_taquara75 <- NULL
+plot_data_taquara75$Count.dist_categories_taquara75 <- NULL
+# Change the column names of the data frame
+colnames(plot_data_taquara75) <- c("Proportion", "Count", "Category")
+plot_data_taquara75 <- plot_data_taquara75[, c("Category", "Count", 
+                                               "Proportion")]
+plot_data_taquara75$Category <- as.numeric(plot_data_taquara75$Category)
+plot_data_taquara75$Category <- as.numeric(c(0, 20, 40, 60, 80, 100, 120, 140, 
+                                             160, 180, 200, 220, 240, 260, 280, 
+                                             300, 320, 340, 360, 380, 400, 420, 
+                                             460, 480, 500, 520))
+plot_data_taquara75
+```
+
+## Plot the proportion of location points by distance category
+```{r}
+ggplot(plot_data_taquara75, aes(x = Category, y = Proportion, group = 1)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Distance to AKDE 75% border (m)") +
+  ylab("Proportion of Locomotion CPs") +
+  scale_y_continuous(expand = c(0.05, 0)) +
+  scale_x_continuous(breaks = seq(0, 520, by = 20))+
+  ggtitle("Taquara")
+```
+
+## I will try some tests to see if there is any relationship
+## Kolmogorov-Smirnov test
+```{r}
+ks.test(df_cp_taquara$dist75, "punif", min = 0, max = max(df_cp_taquara$dist75))
+# Besides the plot looking like there is a tendency of higher proportion of 
+# points closer to the 75% core area border, the test shows no significance..
+```
+
+## Generealized Linear model (poisson distribution)
+```{r}
+glm_taquara_75 <- glm(Count ~  Category, data = plot_data_taquara75, 
+                      family = "poisson")
+summary(glm_taquara_75)
+# No correlation
+```
+
+## I will try another king of plot to see the trend
+```{r}
+plot=ggplot(plot_data_taquara75, aes(y=Proportion , x= Category))+ 
+  geom_point()+
+  geom_smooth(method = "glm", formula = y ~ x)+
+  xlab("Distance to AKDE 75% border (m)") +
+  ylab("Proportion of Locomotion CPs") 
+plot + theme(panel.grid.major = element_blank(), 
+              panel.grid.minor = element_blank(), 
+              panel.background = element_blank(), 
+              axis.line = element_line(colour = "black"))
+```
+### Does not look as expected, indeed. Actually, the trend is to have a higher density of proportions with increases in distance :(
+
+# *Santa Maria!*
+# Read files
+```{r}
+sma_akde95 <- st_read("sma_akde95.gpkg")
+plot(sma_akde95)
+# convert a polygon geometry to a data frame
+sma_akde95 <- st_coordinates(sma_akde95)
+# Convert to data frame
+sma_akde95 <- as.data.frame(sma_akde95)
+head(sma_akde95)
+# Rename the columns
+colnames(sma_akde95) <- c("x", "y")
+head(sma_akde95)
+sma_akde75 <- st_read("sma_akde75.gpkg")
+plot(sma_akde75)
+# convert a polygon geometry to a data frame
+sma_akde75 <- st_coordinates(sma_akde75)
+# Convert to data frame
+sma_akde75 <- as.data.frame(sma_akde75)
+head(sma_akde75)
+# Rename the columns
+colnames(sma_akde75) <- c("x", "y")
+head(sma_akde75)
+df_cp_sma <- read.csv("CP_distanceborder_sma.csv")
+head(df_cp_sma)
+```
+
+## Filter lines just to have locomotion cps (the ones I want to calculate distance to the borders)
+```{r}
+df_cp_sma <- df_cp_sma[df_cp_sma$cp_q5 == "Locomotion", ]
+head(df_cp_sma)
+```
+
+## Plot to understand where the CPs are
+```{r}
+ggplot()+
+  geom_polygon(data = sma_akde95, aes(x=x, y= y),
+               fill = "palegreen4", size = 1)+
+  geom_polygon(data = sma_akde75, aes(x=x, y= y),
+               fill = "yellowgreen", colour = "black") +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, size=2))+
+  geom_point(data = df_cp_sma, aes(x = longitude_x_GAL, 
+                                   y = latitude_y_GAL), size = 1) +
+  coord_fixed()+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=2),
+        plot.margin=unit(c(0.1,0,0,0),"cm"))+
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5, 
+                                   size = 8, colour ="Black"))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_continuous(expand = c(0, 0)) +
+  annotation_scale(location = "tr", width_hint = 0.2, 
+                   pad_x = unit(0.1, "in"), pad_y = unit(0.8, "in"))+
+  annotation_north_arrow(location = "tr", which_north = "true", 
+                         pad_x = unit(0.3, "in"), pad_y = unit(0.1, "in"),
+                         style = north_arrow_fancy_orienteering)
+```
+
+## Some more organization in the data frames
+```{r}
+colnames(df_cp_sma) <- c("date", "time", "y", "x", "behav", "cp_q5")
+sma_akde95[,3:4] <- NULL; head(sma_akde95)
+sma_akde75[,3:4] <- NULL; head(sma_akde75)
+```
+
+## Convert the data frames into sf objects
+```{r}
+# Convert sma_akde95 data frame to an sf object
+sma_akde95_sf <- st_as_sf(sma_akde95, coords = c("x", "y"), crs = crs)
+# Convert sma_akde70 data frame to an sf object
+sma_akde75_sf <- st_as_sf(sma_akde75, coords = c("x", "y"), crs = crs)
+# Convert df_cp_sma data frame to an sf object
+df_cp_sma_sf <- st_as_sf(df_cp_sma, coords = c("x", "y"), crs = crs)
+```
+
+## Use the st_nn function (package nngeo) to calculate the distance between the locomotion CP and the nearest point in the borders. 
+## First 95% AKDE border
+```{r}
+# k = 1 for finding 1 nearest neighbor
+distances_95_sma <- nngeo::st_nn(df_cp_sma_sf, sma_akde95_sf, k = 1, 
+                                 returnDist = T)
+head(distances_95_sma)
+distances_75_sma <- nngeo::st_nn(df_cp_sma_sf, sma_akde75_sf, k = 1, 
+                                 returnDist = T)
+head(distances_75_sma)
+# Extract the distance values from the list
+distance_values_95_sma <- distances_95_sma$dist
+distance_values_75_sma <- distances_75_sma$dist
+# Add the distance values as a new column in df_cp_sma_sf
+df_cp_sma$dist75 <- distance_values_75_sma
+df_cp_sma$dist95 <- distance_values_95_sma
+head(df_cp_sma)
+df_cp_sma$dist95 <- as.numeric(df_cp_sma$dist95)
+df_cp_sma$dist75 <- as.numeric(df_cp_sma$dist75)
+```
+
+## Now, for the plots, I will classify the distances into categories so I can compare frequency proportions of locomotion CPs between distance categories!
+
+## Create the custom breaks for categories -> 95% AKDE
+```{r}
+breaks <- c(0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240)
+```
+
+## Create the distance categories
+```{r}
+dist_categories_sma <- cut(df_cp_sma$dist95, breaks = breaks, labels = FALSE, 
+                           include.lowest = TRUE, right = FALSE)
+```
+
+## Rename the category labels
+```{r}
+category_labels <- paste0("cat", 1:length(breaks[-1]))
+```
+
+## Assign category labels to the distance categories
+```{r}
+dist_categories_sma <- factor(dist_categories_sma, 
+                              levels = 1:length(breaks[-1]), 
+                              labels = category_labels)
+df_cp_sma$cat_dist_95 <- dist_categories_sma
+df_cp_sma
+```
+
+## Compute the frequency of CPs in each category
+```{r}
+freq_table_sma95 <- table(dist_categories_sma)
+```
+
+## Compute the proportion of location points for each distance category
+```{r}
+proportions_sma95 <- freq_table_sma95 / sum(freq_table_sma95)
+
+plot_data_sma95 <- data.frame(Proportion = proportions_sma95,
+                              Count = freq_table_sma95)
+```
+
+## Some more data organization
+```{r}
+plot_data_sma95$Category <- row.names(plot_data_sma95)
+# Reset row names
+row.names(plot_data_sma95) <- NULL
+plot_data_sma95$Proportion.dist_categories_sma <- NULL
+plot_data_sma95$Count.dist_categories_sma <- NULL
+# Change the column names of the data frame
+colnames(plot_data_sma95) <- c("Proportion", "Count", "Category")
+plot_data_sma95 <- plot_data_sma95[, c("Category", "Count", "Proportion")]
+plot_data_sma95$Category <- as.numeric(plot_data_sma95$Category)
+# Convert Category column to numeric, with the distances they represent
+plot_data_sma95$Category <- as.numeric(c(0, 20, 40, 60, 80, 100, 120, 140, 
+                                         160, 180, 200, 220))
+plot_data_sma95
+```
+
+## Plot the proportion of location points by distance category
+```{r}
+ggplot(plot_data_sma95, aes(x = Category, y = Proportion, group = 1)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Distance to AKDE 95% border (m)") +
+  ylab("Proportion of Locomotion CPs") +
+  scale_y_continuous(expand = c(0.05, 0)) +
+  scale_x_continuous(breaks = seq(0, 740, by = 20))+
+  ggtitle("Santa Maria")
+```
+
+## I will try some tests to see if there is any relationship
+## Kolmogorov-Smirnov test
+```{r}
+ks.test(df_cp_sma$dist95, "punif", min = 0, max = max(df_cp_sma$dist95))
+# the test shows no significance. 
+```
+
+## Generealized Linear model (poisson distribution)
+```{r}
+glm_sma_95 <- glm(Count ~  Category, data = plot_data_sma95, 
+                      family = "poisson")
+summary(glm_sma_95)
+# No correlation
+```
+
+# *San Maria - 75% AKDE- Core area*
+## Create the custom breaks for categories
+```{r}
+breaks <- c(0, 20, 40, 60, 80, 100)
+```
+
+## Create the distance categories
+```{r}
+dist_categories_sma75 <- cut(df_cp_sma$dist75, breaks = breaks, 
+                             labels = FALSE, include.lowest = TRUE, 
+                             right = FALSE)
+```
+
+## Rename the category labels
+```{r}
+category_labels <- paste0("cat", 1:length(breaks[-1]))
+```
+
+## Assign category labels to the distance categories
+```{r}
+dist_categories_sma75 <- factor(dist_categories_sma75, 
+                                levels = 1:length(breaks[-1]), 
+                                labels = category_labels)
+df_cp_sma$cat_dist_75 <- dist_categories_sma75
+df_cp_sma
+```
+
+## Compute the frequeicvy of location points according to categories
+```{r}
+freq_table_sma75 <- table(dist_categories_sma75)
+```
+
+## Compute the proportion of location points for each distance category
+```{r}
+proportions_sma75 <- freq_table_sma75 / sum(freq_table_sma75)
+plot_data_sma75 <- data.frame(Proportion = proportions_sma75,
+                              Count = freq_table_sma75)
+```
+
+## Some more data organization
+```{r}
+plot_data_sma75$Category <- row.names(plot_data_sma75)
+# Reset row names
+row.names(plot_data_sma75) <- NULL
+plot_data_sma75$Proportion.dist_categories_sma75 <- NULL
+plot_data_sma75$Count.dist_categories_sma75 <- NULL
+# Change the column names of the data frame
+colnames(plot_data_sma75) <- c("Proportion", "Count", "Category")
+plot_data_sma75 <- plot_data_sma75[, c("Category", "Count", "Proportion")]
+plot_data_sma75$Category <- as.numeric(plot_data_sma75$Category)
+# Convert Category column to numeric, with the distances they represent
+plot_data_sma75$Category <- as.numeric(c(0, 20, 40, 60, 80))
+plot_data_sma75
+```
+
+## Plot the proportion of location points by distance category
+```{r}
+ggplot(plot_data_sma75, aes(x = Category, y = Proportion, group = 1)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Distance to AKDE 75% border (m)") +
+  ylab("Proportion of Locomotion CPs") +
+  scale_y_continuous(expand = c(0.05, 0)) +
+  scale_x_continuous(breaks = seq(0, 520, by = 20))+
+  ggtitle("Santa Maria")
+```
+
+## I will try some tests to see if there is any relationship
+## Kolmogorov-Smirnov test
+```{r}
+ks.test(df_cp_sma$dist75, "punif", min = 0, max = max(df_cp_sma$dist75))
+# the test shows significance. However, we have just 3 points and 2 locations. 
+# Too few points for us to see any pattern
+```
+
+## Generealized Linear model (poisson distribution)
+```{r}
+glm_sma_75 <- glm(Count ~  Category, data = plot_data_sma75, 
+                      family = "poisson")
+summary(glm_sma_75)
+# No correlation
+```
+
+
+# *Suzano!*
+## Read files
+```{r}
+suzano_akde95 <- st_read("suzano_akde95.gpkg")
+plot(suzano_akde95)
+# convert a polygon geometry to a data frame
+suzano_akde95 <- st_coordinates(suzano_akde95)
+# Convert to data frame
+suzano_akde95 <- as.data.frame(suzano_akde95)
+head(suzano_akde95)
+# Rename the columns
+colnames(suzano_akde95) <- c("x", "y")
+head(suzano_akde95)
+suzano_akde70 <- st_read("suzano_akde70.gpkg")
+plot(suzano_akde70)
+# convert a polygon geometry to a data frame
+suzano_akde70 <- st_coordinates(suzano_akde70)
+# Convert to data frame
+suzano_akde70 <- as.data.frame(suzano_akde70)
+head(suzano_akde70)
+# Rename the columns
+colnames(suzano_akde70) <- c("x", "y")
+head(suzano_akde70)
+df_cp_suzano <- read.csv("CP_distanceborder_suzano.csv")
+head(df_cp_suzano)
+```
+
+## Filter lines just to have locomotion cps (the ones I want to calculate distance to the borders)
+```{r}
+df_cp_suzano <- df_cp_suzano[df_cp_suzano$cp_q6 == "Locomotion", ]
+head(df_cp_suzano)
+```
+
+## Plot the data to see the distribution of Locomomotion CPs
+```{r, warning=FALSE}
+ggplot()+
+  geom_polygon(data = suzano_akde95, aes(x=x, y= y),
+               fill = "palegreen4", size = 1)+
+  geom_polygon(data = suzano_akde70, aes(x=x, y= y),
+               fill = "yellowgreen", colour = "black") +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, size=2))+
+  geom_point(data = df_cp_suzano, aes(x = longitude_x_GAL, 
+                                      y = latitude_y_GAL), size = 1) +
+  coord_fixed()+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=2),
+        plot.margin=unit(c(0.1,0,0,0),"cm"))+
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5, 
+                                   size = 8, colour ="Black"))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_continuous(expand = c(0, 0)) +
+  annotation_scale(location = "tr", width_hint = 0.2, 
+                   pad_x = unit(0.1, "in"), pad_y = unit(0.8, "in"))+
+  annotation_north_arrow(location = "tr", which_north = "true", 
+                         pad_x = unit(0.3, "in"), pad_y = unit(0.1, "in"),
+                         style = north_arrow_fancy_orienteering)
+```
+
+## Some more data organization
+```{r}
+colnames(df_cp_suzano) <- c("date", "time", "y", "x", "behav", "cp_q6")
+suzano_akde95[,3:4] <- NULL; head(suzano_akde95)
+suzano_akde70[,3:4] <- NULL; head(suzano_akde70)
+```
+
+## Convert data frames to sf objects
+```{r}
+# Convert suzano_akde95 data frame to an sf object
+suzano_akde95_sf <- st_as_sf(suzano_akde95, coords = c("x", "y"), crs = crs)
+
+# Convert suzano_akde70 data frame to an sf object
+suzano_akde70_sf <- st_as_sf(suzano_akde70, coords = c("x", "y"), crs = crs)
+
+# Convert df_cp_suzano data frame to an sf object
+df_cp_suzano_sf <- st_as_sf(df_cp_suzano, coords = c("x", "y"), crs = crs)
+```
+
+## Use the st_nn function (package nngeo) to calculate the distance between the locomotion CP and the nearest point in the borders. 
+## First 95% AKDE border
+
+```{r}
+# k = 1 for finding 1 nearest neighbor
+distances_95 <- nngeo::st_nn(df_cp_suzano_sf, suzano_akde95_sf, k = 1, returnDist = T)
+head(distances_95)
+```
+
+## Than to the 70% AKDE border
+```{r}
+distances_70 <- nngeo::st_nn(df_cp_suzano_sf, suzano_akde70_sf, k = 1, returnDist = T)
+head(distances_70)
+```
+
+## Extract the distance values from the list
+```{r}
+distance_values_95 <- distances_95$dist
+distance_values_70 <- distances_70$dist
+```
+
+## Add the distance values as a new column in df_cp_suzano_sf
+```{r}
+df_cp_suzano$dist70 <- distance_values_70
+df_cp_suzano$dist95 <- distance_values_95
+head(df_cp_suzano)
+df_cp_suzano$dist95 <- as.numeric(df_cp_suzano$dist95)
+df_cp_suzano$dist70 <- as.numeric(df_cp_suzano$dist70)
+```
+
+## Now, for the plots, I will classify the distances into categories so I can compare frequency proportions of locomotion CPs between distance categories!
+
+## Create the custom breaks for categories -> 95% AKDE
+```{r}
+breaks <- c(0, 20, 40, 60, 80, 100)
+```
+
+## Create the distance categories
+```{r}
+dist_categories_suzano <- cut(df_cp_suzano$dist95, breaks = breaks, 
+                              labels = FALSE, include.lowest = TRUE, 
+                              right = FALSE)
+```
+
+## Rename the category labels
+```{r}
+category_labels <- paste0("cat", 1:length(breaks[-1]))
+```
+
+## Assign category labels to the distance categories
+```{r}
+dist_categories_suzano <- factor(dist_categories_suzano, 
+                                 levels = 1:length(breaks[-1]), 
+                                 labels = category_labels)
+df_cp_suzano$cat_dist_95 <- dist_categories_suzano
+df_cp_suzano
+```
+
+## Compute the frequency of points in each category
+```{r}
+freq_table_suzano95 <- table(dist_categories_suzano)
+```
+
+## Compute the proportion of location points for each distance category
+```{r}
+proportions_suzano95 <- freq_table_suzano95 / sum(freq_table_suzano95)
+
+plot_data_suzano95 <- data.frame(Proportion = proportions_suzano95,
+                                 Count = freq_table_suzano95)
+```
+
+## More data organization
+```{r}
+# Add row names as a separate column
+plot_data_suzano95$Category <- row.names(plot_data_suzano95)
+# Reset row names
+row.names(plot_data_suzano95) <- NULL
+plot_data_suzano95$Proportion.dist_categories_suzano <- NULL
+plot_data_suzano95$Count.dist_categories_suzano <- NULL
+# Change the column names of the data frame
+colnames(plot_data_suzano95) <- c("Proportion", "Count", "Category")
+plot_data_suzano95 <- plot_data_suzano95[, c("Category", "Count", "Proportion")]
+plot_data_suzano95$Category <- as.numeric(plot_data_suzano95$Category)
+# Convert Category column to numeric, with the distances they represent
+plot_data_suzano95$Category <- as.numeric(c(0, 20, 40, 60, 80))
+plot_data_suzano95
+```
+
+## Plot the proportion of location points by distance category
+```{r}
+ggplot(plot_data_suzano95, aes(x = Category, y = Proportion, group = 1)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Distance to AKDE 95% border (m)") +
+  ylab("Proportion of Locomotion CPs") +
+  scale_y_continuous(expand = c(0.05, 0)) +
+  scale_x_continuous(breaks = seq(0, 740, by = 20))+
+  ggtitle("Suzano")
+```
+
+## I will try some tests to see if there is any relationship
+## Kolmogorov-Smirnov test
+```{r}
+ks.test(df_cp_suzano$dist95, "punif", min = 0, max = max(df_cp_suzano$dist95))
+# the test almost shows significance. 
+```
+
+## Generealized Linear model (poisson distribution)
+```{r}
+glm_suzano_95 <- glm(Count ~  Category, data = plot_data_suzano95, 
+                      family = "poisson")
+summary(glm_suzano_95)
+# No correlation
+```
+
+# *Suzano - 70% AKDE - Core area*
+## Create the custom breaks for categories 95%
+```{r}
+breaks <- c(0, 20, 40, 60, 80)
+```
+
+## Create the distance categories
+```{r}
+dist_categories_suzano <- cut(df_cp_suzano$dist70, breaks = breaks, 
+                              labels = FALSE, include.lowest = TRUE, 
+                              right = FALSE)
+```
+## Rename the category labels
+```{r}
+category_labels_suzano_70 <- paste0("cat", 1:length(breaks[-1]))
+```
+
+## Assign category labels to the distance categories
+```{r}
+dist_categories_suzano <- category_labels_suzano_70[dist_categories_suzano]
+category_labels_suzano_70 <- paste0("cat", 1:length(unique(
+  dist_categories_suzano)))
+df_cp_suzano$cat_dist_70 <- factor(dist_categories_suzano, 
+                                   levels = unique(dist_categories_suzano), 
+                                   labels = category_labels_suzano_70)
+df_cp_suzano
+```
+
+## I do not understand why the code is not working correctly now... So I will create a vector with the category for each point manually and than assign to the data frame.
+```{r}
+df_cp_suzano$cat_dist_70 <- c("cat2","cat2", "cat3", "cat1",  "cat4", "cat4", 
+                              "cat3", "cat4", "cat2", "cat2", "cat4", "cat2", 
+                              "cat2", "cat3", "cat1", "cat2", "cat2", "cat2")
+```
+
+## Compute the frequency of points in each category
+```{r}
+freq_table_suzano70 <- table(df_cp_suzano$cat_dist_70)
+```
+
+## Compute the proportion of location points for each distance category
+```{r}
+proportions_suzano70 <- freq_table_suzano70 / sum(freq_table_suzano70)
+plot_data_suzano70 <- data.frame(Proportion = proportions_suzano70,
+                                 Count = freq_table_suzano70)
+```
+
+## More data organization
+```{r}
+## Add row names as a separate column
+plot_data_suzano70$Category <- row.names(plot_data_suzano70)
+# Reset row names
+row.names(plot_data_suzano70) <- NULL
+plot_data_suzano70$Count.Var1 <- NULL
+plot_data_suzano70$Proportion.Var1 <- NULL
+# Change the column names of the data frame
+colnames(plot_data_suzano70) <- c("Proportion", "Count", "Category")
+plot_data_suzano70 <- plot_data_suzano70[, c("Category", "Count", "Proportion")]
+plot_data_suzano70$Category <- as.numeric(plot_data_suzano70$Category)
+# Convert Category column to numeric, with the distances they represent
+plot_data_suzano70$Category <- as.numeric(c(0, 20, 40, 60))
+plot_data_suzano70
+```
+
+## Plot the proportion of location points by distance category
+```{r}
+ggplot(plot_data_suzano70, aes(x = Category, y = Proportion, group = 1)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Distance to AKDE 70% border (m)") +
+  ylab("Proportion of Locomotion CPs") +
+  scale_y_continuous(expand = c(0.05, 0)) +
+  scale_x_continuous(breaks = seq(0, 80, by = 20))+
+  ggtitle("Suzano")
+```
+
+## I will try some tests to see if there is any relationship
+## Kolmogorov-Smirnov test
+```{r}
+ks.test(df_cp_suzano$dist70, "punif", min = 0, max = max(df_cp_suzano$dist70))
+# the test shows no significance. 
+```
+
+## Generealized Linear model (poisson distribution)
+```{r}
+glm_suzano_70 <- glm(Count ~  Category, data = plot_data_suzano70, 
+                      family = "poisson")
+summary(glm_suzano_70)
+# No correlation
+```
+
+## I will try another kind of plot to see the trend
+```{r}
+plot=ggplot(plot_data_suzano70, aes(y=Proportion , x= Category))+ 
+  geom_point()+
+  geom_smooth(method = "glm", formula = y ~ x)+
+  xlab("Distance to AKDE 70% border (m)") +
+  ylab("Proportion of Locomotion CPs") 
+plot + theme(panel.grid.major = element_blank(), 
+              panel.grid.minor = element_blank(), 
+              panel.background = element_blank(), 
+              axis.line = element_line(colour = "black"))
+```
+### Does not look as expected, indeed :(
+
+*** 
+
+# I will try a last test for Suzano. 
+## Since the edges of the forest in Suzano are more restrictive than in the other areas, I will test if the Locomotion CPs are more frequent close to te edges. I considered as an edge the frontier between 1) forest and river; and 2) forest and matrix. 
+
+## Read files
+```{r}
+edge <- st_read("edge_suzano.gpkg")
+plot(edge)
+# convert a polygon geometry to a data frame
+edge <- st_coordinates(edge)
+# Convert to data frame
+edge <- as.data.frame(edge)
+head(edge)
+# Rename the columns
+colnames(edge) <- c("x", "y", "lineid")
+head(edge)
+```
+
+## Convert data frames to sf objects
+```{r}
+# Convert suzano_akde95 data frame to an sf object
+edge_sf <- st_as_sf(edge, coords = c("x", "y"), crs = crs)
+```
+
+## Use the st_nn function (package nngeo) to calculate the distance between the locomotion CP and the nearest point in the edges. 
+```{r}
+# k = 1 for finding 1 nearest neighbor
+distances_edge <- nngeo::st_nn(df_cp_suzano_sf, edge_sf, k = 1, returnDist = T)
+head(distances_edge)
+```
+
+## Extract the distance values from the list
+```{r}
+distances_edge <- distances_edge$dist
+```
+
+## Add the distance values as a new column in df_cp_suzano_sf
+```{r}
+df_cp_suzano$edge <- distances_edge
+head(df_cp_suzano)
+df_cp_suzano$edge <- as.numeric(df_cp_suzano$edge)
+```
+
+## Now, for the plots, I will classify the distances into categories so I can compare frequency proportions of locomotion CPs between distance categories!
+
+## Create the custom breaks for categories 
+```{r}
+summary(df_cp_suzano$edge)
+breaks <- c(0, 20, 40, 60, 80, 100, 120)
+```
+
+## Create the distance categories
+```{r}
+dist_categories_suzano <- cut(df_cp_suzano$edge, breaks = breaks, 
+                              labels = FALSE, include.lowest = TRUE, 
+                              right = FALSE)
+```
+
+## Rename the category labels
+```{r}
+category_labels <- paste0("cat", 1:length(breaks[-1]))
+```
+
+## Assign category labels to the distance categories
+```{r}
+dist_categories_suzano <- factor(dist_categories_suzano, 
+                                 levels = 1:length(breaks[-1]), 
+                                 labels = category_labels)
+df_cp_suzano$cat_edge <- dist_categories_suzano
+df_cp_suzano
+```
+
+## Compute the frequency of points in each category
+```{r}
+freq_table_suzano_edge <- table(dist_categories_suzano)
+```
+
+## Compute the proportion of location points for each distance category
+```{r}
+proportions_suzano_edge <- freq_table_suzano_edge / sum(freq_table_suzano_edge)
+
+plot_data_suzano_edge <- data.frame(Proportion = proportions_suzano_edge,
+                                 Count = freq_table_suzano_edge)
+```
+
+## More data organization
+```{r}
+# Add row names as a separate column
+plot_data_suzano_edge$Category <- row.names(plot_data_suzano_edge)
+# Reset row names
+row.names(plot_data_suzano_edge) <- NULL
+plot_data_suzano_edge$Proportion.dist_categories_suzano <- NULL
+plot_data_suzano_edge$Count.dist_categories_suzano <- NULL
+# Change the column names of the data frame
+colnames(plot_data_suzano_edge) <- c("Proportion", "Count", "Category")
+plot_data_suzano_edge <- plot_data_suzano_edge[, c("Category", "Count", "Proportion")]
+plot_data_suzano_edge$Category <- as.numeric(plot_data_suzano_edge$Category)
+# Convert Category column to numeric, with the distances they represent
+plot_data_suzano_edge$Category <- as.numeric(c(0, 20, 40, 60, 80,100))
+plot_data_suzano_edge
+```
+
+## Plot the proportion of location points by distance category
+```{r}
+ggplot(plot_data_suzano_edge, aes(x = Category, y = Proportion, group = 1)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Distance to edges (m)") +
+  ylab("Proportion of Locomotion CPs") +
+  #scale_y_continuous(expand = c(0.05, 0)) +
+  #scale_x_continuous(breaks = seq(0, 120, by = 20))+
+  ggtitle("Suzano")
+```
+
+## I will try some tests to see if there is any relationship
+## Kolmogorov-Smirnov test
+```{r}
+ks.test(df_cp_suzano$edge, "punif", min = 0, max = max(df_cp_suzano$edge))
+# not significative. 
+```
+
+## Generealized Linear model (poisson distribution)
+```{r}
+glm_suzano_edge <- glm(Count ~  Category, data = plot_data_suzano_edge, 
+                      family = "poisson")
+summary(glm_suzano_edge)
+# No correlation
+```
+
+I will try another kind of plot to see the trend
+```{r}
+plot=ggplot(plot_data_suzano_edge, aes(y=Proportion , x= Category))+
+  geom_point()+
+  geom_smooth(method = "glm", formula = y ~ x)+
+  xlab("Distance to edges (m)") +
+  ylab("Proportion of Locomotion CPs")
+plot + theme(panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              panel.background = element_blank(),
+              axis.line = element_line(colour = "black"))
+```
+
+## **I can see that there is no significative relationchip between edeges and Locomotion CPs, despite a small trend to increase frequency of CPs with increases in distance to edges.**

@@ -1,0 +1,2261 @@
+---
+title: "Change Point Test_Guareí-Taquara-Suzano_FB_2022_07_d01"
+author: "Felipe Bufalo"
+date: "7/1/2022"
+output: pdf_document
+---
+
+# I created this script to understand what are the location points to which black lion tamarins (BLTs) are directing their routes to in different areas (Guareí, Taquara and Suzano). For that, in this script, I will run the Change Point Test (CPT). This test, in an objective way, allows the identification of points of direction change (CPs) along each daily route.
+
+## Load the packages _'RColorBrewer'_, _'maptools'_, _'classInt'_, _'tidyverse'_, _'ggplot2'_, _'ggspatial'_.
+
+```{r, include=FALSE}
+library(RColorBrewer)
+library(sf)
+library(dplyr)
+library(classInt)# CPT Test
+library(tidyverse)
+library(ggplot2)
+library(ggspatial)
+```
+
+**Load data to work with**
+
+```{r}
+load("cpt_guarei.rda")
+
+forest_guarei <- st_read("forest_guarei.gpkg")
+forest_guarei <- st_coordinates(forest_guarei)
+forest_guarei <- as.data.frame(forest_guarei)
+
+k95 <- st_read("guarei_akde95.gpkg")
+k95 <- st_coordinates(k95)
+k95 <- as.data.frame(k95)
+
+k70 <- st_read("guarei_akde70.gpkg")
+k70 <- st_coordinates(k70)
+k70 <- as.data.frame(k70)
+```
+
+# I adapted the script available at:
+
+BYRNE, R. W.  et al. How did they get here from there? Detecting changes of direction in terrestrial ranging. Animal Behaviour, v. 77, n. 3, p. 619-631, 2009/03/01/ 2009. ISSN 0003-3472. Disponível em: < http://www.sciencedirect.com/science/article/pii/S0003347208005514 >.
+
+# Starting with Guareí!
+
+# First, I need to understand my data and set the best q value for the CPT to find the largest number of CPs. __The q value represents the number of vectors to be considered by the CPT before each possible CP is found.__ For that, I adapted Byrne et al. 2009 to run in loops the CPT for all q values, from 1 to 10. I considered alpha = 0.01, 10000 permutations and tolerance (tol) = 10 meters in order to remove GPS error at the study site.
+
+## I converted the column "date" to factor to allow grouping the days into levels.
+```{r}
+data_guarei$date <- as.factor(data_guarei$date)
+class(data_guarei$date)
+days <- levels(data_guarei$date); head(days)
+```
+
+
+## Next step was creating an output datafame with a a column "q" for printing the "q" values which I am testing.
+```{r}
+output_guarei <- data_guarei
+output_guarei$CP <- ""
+output_guarei$q <- ""
+output_guarei <- output_guarei[-c(1:nrow(output_guarei)),]; head(output_guarei)
+```
+
+## Now I run the test for all "q" values (1:10) and all 25 days. I also used alpha=0.01, N=10000, and tol=0.
+
+```{r}
+for(date.mlp in days[1:26]) {
+  
+  print(date.mlp)
+  
+  for(q in 1:10) {
+    
+    print(paste(date.mlp, "q =", q))
+    
+    datainp_g <- data_guarei[data_guarei$date == date.mlp,]
+    
+    inp<-matrix(c(0),dim(datainp_g)[1],2)
+    inp<-datainp_g[,6:7]
+    
+    x1<-inp[[1]]
+    x2<-inp[[2]]
+    
+    # Inspect first few rows of the data
+    xy <- cbind(x1,x2)
+    head(xy)
+    
+    # INPUTS
+    # input alpha
+    # alpha = significance level
+    # alpha = 0.01 is a convenient default
+    alpha <- 0.01
+    
+    # input q
+    # Enter value of q
+    # q = 4 is used here just as an example.
+    # The user should replace this by a value of q
+    # that is appropriate for the species and data
+    # considered, e.g. that obtained by running CPT_Rcode
+    # on part of the data.
+    #q <- 6
+    
+    # input N
+    # N = total number of permutations (1 observed and N-1 simulated) 
+    # # N = 10000 is a convenient number
+    N <- 10000
+    
+    # input tol
+    # tol = tolerance
+    # = maximum distance between indistinguishable positions # tol = 0 is a 
+    # convenient default
+    # The user may like to replace this by
+    # twice the average GPS error in research area
+    tol <- 0
+    
+    # PRELIMINARIES
+    # Reverse the time-ordering,
+    # so that (bx1[1], bx2[1]) refers to (final)
+    #  putative goal
+    bx1 <- 0*x1
+    bx2 <- 0*x2
+    
+    n <- length(x1)
+    for (j in 1:n){
+      bx1[j] <- x1[n-j+1]
+      bx2[j] <- x2[n-j+1]
+    }
+    # Calculate the steps (bxdiff1, bxdiff2)
+    bx1diff <- diff(bx1)
+    bx2diff <- diff(bx2)
+    
+    # REMOVE POINTS AT WHICH ANIMAL STAYS STILL
+    # ind is (reverse) time ordering of points
+    # newp > 0 if point differs from previous point
+    tolsq <- tol^2
+    ind <- c(1:n)
+    newp <- c(1:n)
+    for (j in 2:n){
+      newp[j] <- ind[j]*( bx1diff[j-1]^2 + bx2diff[j-1]^2 > tolsq)
+    }
+    
+    # bz1, bz2 are coordinates of points(in reverse time order) 
+    # at which there is movement
+    bz1 <- bx1[newp >0]
+    bz2 <- bx2[newp >0]
+    nz <- length(bz1)
+    
+    # We shall apply the CPT to points with coordinates (bz1,bz2)
+    # Calculate the steps (bzdiff1, bzdiff2)
+    bz1diff <- diff(bz1)
+    bz2diff <- diff(bz2)
+    # SOME DECLARATIONS
+    # goal.no = number (from end) of current putative goal 
+    # (with goal.no = 1 for end position
+    
+    # Thus goal.no = goal.t + 1
+    # where goal.t was used in original code to refer to
+    # time of current putative goal (with goal.t = 0 
+    # for # end position # start with goal.no = 1
+    goal.no <- 1
+    
+    # last.no = number (backwards in time) of last position of 
+    # interest # last.no = length(bz1) is a convenient default
+    # (and includes all the positions)
+    last.no <- length(bz1)
+    no.of.nos <- length(bz1)
+    Rsumrand  <- rep(0, len=N)
+    Rsumrandr <- rep(0, len=N)
+    
+    # Pr will store observed p-values in a run of r
+    Pr <- rep(1, len=no.of.nos)
+    
+    # sig is a vector indicating whether or not
+    # waypoint k is detected as a possible change point: 
+    # sig[k] = 1 if change point detected at waypoint k 
+    # sig[k] = 0 otherwise
+    sig <- rep(0,nz)
+    
+    # k is number of steps in "k-leg"
+    k <- 0
+    
+    # LOOK (SEQUENTIALLY) FOR NEXT POSSIBLE CHANGE POINT 
+    
+    while(goal.no < last.no - q){
+      
+      print(goal.no)
+      
+      k <- 0
+      
+      # INCREASE k UNTIL NEXT POSSIBLE CHANGE POINT IS FOUND 
+      # Re-initialise Pr
+      Pr <- 0*Pr + 1
+      P <- 1
+      
+      while ((P > alpha) && (goal.no + q + k < last.no)){ 
+        #B
+        
+        k <- k + 1
+        
+        R1 <- sqrt((bz1[goal.no+k] - bz1[goal.no])^2 + (bz2[goal.no+k] - 
+                                                          bz2[goal.no])^2) 
+        R2 <- sqrt((bz1[goal.no+k+q] - bz1[goal.no+k])^2 + (bz2[goal.no+k+q] - 
+                                                              bz2[goal.no+k])^2)
+        Rsum <- R1 + R2
+        
+        # Rsumrand[1] = observed value of statistic R1 + R2 
+        Rsumrand[1] <- Rsum
+        
+        # Now calculate statistic R1 + R2 for a further N-1 
+        # random permutations and store in Rsumrand
+        for (it in 2:N){
+          # start of it loop C
+          u <- runif(k+q,0,1)
+          perm <- order(u)
+          bz1r <- bz1[goal.no]
+          bz2r <- bz2[goal.no]
+          for (j in 1:k){ # start of j loop D 
+            bz1r <- bz1r + bz1diff[goal.no-1+perm[j]] 
+            bz2r <- bz2r + bz2diff[goal.no-1+perm[j]]
+          } # end of j loop D
+          
+          R1rand <- sqrt((bz1r - bz1[goal.no])^2 + (bz2r - bz2[goal.no])^2)
+          R2rand <- sqrt((bz1[goal.no+k+q] - bz1r)^2 + 
+                           (bz2[goal.no+k+q] - bz2r)^2) 
+          Rsumrand[it] <- R1rand + R2rand
+        } # end of it loop C
+        
+        P <- sum(Rsumrand >= Rsum)/N
+        
+        Pr[k] <- P
+        
+      } # end of "while" on
+      # ((P > alpha) && (goal.no + q + k < last.no)) B
+      # f is the first value of k in the current run that is significant 
+      f <- k
+      
+      while ((P <= alpha) && (goal.no + q + k < last.no)){ 
+        #E
+        
+        k <- k+1
+        R1 <- sqrt((bz1[goal.no+k] - bz1[goal.no])^2 + 
+                     (bz2[goal.no+k] - bz2[goal.no])^2)
+        
+        R2 <- sqrt((bz1[goal.no+k+q] - bz1[goal.no+k])^2 + 
+                     (bz2[goal.no+k+q] - bz2[goal.no+k])^2)
+        
+        Rsum <- R1 + R2
+        
+        # Rsumrand[1] = observed value of statistic R1 + R2 
+        Rsumrand[1] <- Rsum
+        
+        # Now calculate statistic R1 + R2 for a further N-1 
+        # random permutations and store in Rsumrand
+        for (it in 2:N){ # start of it loop F
+          u <- runif(k+q,0,1)
+          perm <- order(u)
+          bz1r <- bz1[goal.no]
+          bz2r <- bz2[goal.no]
+          for (j in 1:k){ # start of j loop G 
+            bz1r <- bz1r + bz1diff[goal.no-1+perm[j]] 
+            bz2r <- bz2r + bz2diff[goal.no-1+perm[j]]
+          } # end of j loop G
+          
+          R1rand <- sqrt((bz1r - bz1[goal.no])^2 + 
+                           (bz2r - bz2[goal.no])^2)
+          R2rand <- sqrt((bz1[goal.no+k+q] - bz1r)^2 + 
+                           (bz2[goal.no+k+q] - bz2r)^2)      
+          Rsumrand[it] <- R1rand + R2rand
+        } # end of it loop F
+        
+        P <- sum(Rsumrand >= Rsum)/N
+        
+        Pr[k] <- P
+        
+      }  # end of "while" on
+      
+      # ((P < alpha) && (goal.no + q + k < last.no)) E
+      
+      # l is the last value of k in the current run that is significant 
+      l <- k - 1
+      
+      # apply "peak rule"
+      Pr[f:l]
+      rmin <- min(which(Pr[f:l] == min(Pr[f:l]))) 
+      rmin <- if(l >=f) rmin else 0
+      
+      goal.no <- ifelse(rmin > 0, goal.no + f + rmin - 1, last.no) 
+      
+      sig[goal.no] <- ifelse(goal.no == last.no,0,1)
+      
+    } # end of "while" on (goal.no < last.no - q) # A
+    
+    #  Remove putative goal from list of CP's
+    sig[1] <- 0
+    
+    # OUTPUTS
+    
+    # OUTPUT OF
+    # (first, last) (row nos. of first and last times at 
+    # "significant" change points)
+    # (east, north) (their coordinates)
+    # cp lists indices of waypoints identified as change points
+    cp <- which(sig==1)
+    
+    
+    # bsig is sig in reverse time-order
+    bsig <- rep(0,nz)
+    for (j in 1:nz){
+      bsig[j] <- sig[nz-j+1]
+    }
+    
+    # "times" (row nos.) and coordinates of change points 
+    newpp <- newp[newp > tol]
+    cp.time <- newpp[sig==1]
+    cp.bx1 <- bz1[sig==1]
+    cp.bx2 <- bz2[sig==1]
+    cp.no <- n + 1 - cp.time
+    # last is cp.no in reverse order
+    last <- 0*cp.no
+    cp.leng <- length(cp.no)
+    for (j in 1:cp.leng){
+      last[j] <- cp.no[cp.leng-j+1]
+    }
+    # last contains row nos. of (last times at) change points 
+    # (east, north) are their coordinates
+    east <- x2[last]
+    north <- x1[last]
+    
+    # first contains row nos. of first times at change points 
+    first <- 0*last
+    for (j in 1:length(last)){
+      first[j] <- n+2 - min(which(newp > (n+1-last[j])))
+    }
+    
+    # PLOT WAYPOINTS AND MARK CHANGE POINTS
+    # For plotting purposes, reverse the order of
+    # bz1, bz2 to get z1, z2
+    z1 <- 0*bz1
+    z2 <- 0*bz2
+    nz <- length(z1)
+    for (j in 1:nz){
+      z1[j] <- bz1[nz-j+1]
+      z2[j] <- bz2[nz-j+1]
+    }
+    # s is vector to index the points
+    s <- c(1:nz)
+    
+    # Save change-points
+    z1bsig <- z1[bsig==1]# Latitude of CPs
+    z2bsig <- z2[bsig==1]# Longitude of CPs
+    cpsame <- which(first == last)
+    cpdiff <- which(first != last)
+    lastsame <- last[cpsame]# Number of lines where CPs are located 
+    firstdiff <- first[cpdiff]
+    lastdiff <- last[cpdiff]
+    z1bsame <- z1bsig[cpsame]
+    z2bsame <- z2bsig[cpsame]
+    z1bdiff <- z1bsig[cpdiff]
+    z2bdiff <- z2bsig[cpdiff]
+    
+    
+    # create a new column
+    datainp_g$cp <- "NO-CP"; head(datainp_g)
+    # Fill CPs in the change point locations
+    true.index <- which((datainp_g$longitude %in% z2bsig) & 
+                          (datainp_g$latitude %in% z1bsig))
+    datainp_g$cp[true.index] <- "CP"
+    
+    # fill q value
+    datainp_g$q <- q
+    
+    # plot
+    plot(datainp_g$longitude, datainp_g$latitude, pch = 19, 
+         main = datainp_g$date[1])
+    # lines
+    lines(datainp_g$longitude, datainp_g$latitude)
+    points(datainp_g[datainp_g$cp == "CP",]$longitude, 
+           datainp_g[datainp_g$cp == "CP",]$latitude, pch = 19, col = 2)
+    
+    output_guarei <- rbind(output_guarei, datainp_g)
+  }
+}
+```
+
+## Filtering duplicated lines so I don't count more than once the same "CP"
+```{r}
+output_guarei_filter<- output_guarei[,-c(1,3,4,5)]; head(output_guarei_filter)
+output_guarei_filter<- output_guarei_filter[!duplicated(output_guarei_filter), ]
+head(output_guarei_filter)
+```
+
+## Summary to understand the number of "CPs" according to value of "q"
+```{r}
+count_cps_guarei <- output_guarei_filter %>% 
+  dplyr::group_by(date, q) %>% 
+  dplyr::summarize(number.of.CPs = sum(cp == "CP"))
+head(count_cps_guarei)
+```
+
+## Now I organize the data into wide format to plot and understand what is the best value of "q" to use:
+```{r}
+count_cps_guarei_wide <- spread(count_cps_guarei, key = date, 
+                                value = number.of.CPs)
+# Create "total"TOTAL" column with sum or row values:
+count_cps_guarei_wide <- count_cps_guarei_wide %>%
+  mutate(TOTAL=rowSums(.[setdiff(names(.),"q")]))
+# Converting to data.frame:
+count_cps_guarei_wide<-as.data.frame(count_cps_guarei_wide)
+```
+
+## Ploting "q" for Guareí:
+### Plot of number of CPs per day according to values of "q" from 1 to 10. Light-gray lines represent number of CPs for each value of "q" in a unique day. Thick black line represent the sum of CPs for each value of "q" in all days.
+```{r}
+par(mfrow=c(1,1))
+plot(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"10/06/19"],
+     type="o",pch=20,
+     col="gray85",xlab="q",ylab ="Number of change- points",
+     xlim=c(1,max(count_cps_guarei_wide[,"q"])),
+     ylim=c(1,max(count_cps_guarei_wide)),lab=c(10,20,0))
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"11/06/19"],
+       type="o",pch=20,col="gray85")
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"11/07/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"11/08/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"12/06/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"12/07/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"12/08/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"13/07/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"13/08/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"14/06/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"14/08/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"15/06/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"15/08/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"16/05/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"16/07/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"17/05/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"17/06/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"17/07/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"18/05/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"18/07/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"19/07/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"19/08/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"20/05/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"20/07/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"20/08/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"21/08/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_guarei_wide[,"q"],count_cps_guarei_wide[,"TOTAL"],
+       type="o",pch=20,col="black", lwd=3)
+```
+
+## It looks like q = 7 is the best for running the analysis, since it is the last value at which the number of CPs increases continuously. 
+
+## After finding q, I just have to create a subset of my "output_guarei" file with q = 7.
+```{r}
+cpt_guarei <- subset(output_guarei, q == 7)
+cpt_guarei <- subset(cpt_guarei, select = -id)
+cpt_guarei$id <- 1:nrow(cpt_guarei)
+cpt_guarei<-cpt_guarei[,c(9,1,2,3,4,5,6,7,8)]
+head(cpt_guarei)
+```
+
+***
+# Here I present the plot with all identified CPs and associated behaviors in Guareí. Also, I plot here 3 different zones (territory and fragment borders and core area). For this, I have worked in the dataframes in excel previously to organize the data acoordingly.
+
+### Identification of behaviors associated with direction change (CPs) along black lion tamarins' daily routes. Pink triangles = frugivory (67%), cyan diamonds = foraging (24%), red circles = locomotion (5%), orange upside-down triangles = encounter (3%), light-gray circle = fur-rubbing (1%). Little black dots and lines repesent GPS points recorded every 5 minutes.
+```{r}
+#tiff(".tiff", width = 11000, height = 6500, res = 1000)
+ggplot()+
+  geom_polygon(data = forest_guarei, aes(x=X, y= Y),
+               fill = "darkgreen", colour = "black", size = 1)+
+  geom_polygon(data = k95, aes(x=X, y= Y),
+               fill = "palegreen4", colour = "black")+
+  geom_polygon(data = k70, aes(x=X, y= Y),
+               fill = "yellowgreen", colour = "black") +
+  #geom_polygon(data = k50, aes(x=long, y= lat, group=group),
+               #fill = "yellowgreen", colour = "black") +
+  #geom_polygon(data = k50, aes(x=long, y= lat, group=group),
+               #fill = "mediumseagreen", colour = "black")+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, size=2))+
+  geom_point(data = output.guarei1, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.guarei1, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.guarei2, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.guarei2, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.guarei3, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.guarei3, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.guarei4, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.guarei4, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.guarei5, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.guarei5, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.guarei6, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.guarei6, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.guarei7, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.guarei7, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.guarei8, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.guarei8, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.guarei9, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.guarei9, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.guarei10, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei10, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei11, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei11, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei12, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei12, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei13, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei13, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei14, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei14, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei15, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei15, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei16, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei16, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei17, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei17, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei18, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei18, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei19, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei19, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei20, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei20, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei21, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei21, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei22, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei22, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei23, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei23, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei24, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei24, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei25, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei25, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei26, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.guarei26, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.guarei[output.guarei$cpffru == "x",], 
+             aes(x = longitude, y = latitude), fill = "pink", 
+             shape = 24, size = 4, stroke = 1)+
+  geom_point(data = output.guarei[output.guarei$cplocom == "x",], 
+             aes(x = longitude, y = latitude), fill = "red", 
+             shape = 21, size = 4, stroke = 1)+
+  geom_point(data = output.guarei[output.guarei$cpfor == "x",], 
+             aes(x = longitude, y = latitude), fill = "cyan", 
+             shape = 23, size = 4, stroke = 1)+
+  geom_point(data = output.guarei[output.guarei$cpagonin == "x",], 
+             aes(x = longitude, y = latitude), fill = "coral", 
+             shape = 25, size = 4, stroke = 1)+
+  geom_point(data = output.guarei[output.guarei$cprubb == "x",], 
+             aes(x = longitude, y = latitude), fill = "aliceblue", 
+             shape = 21, size = 4, stroke = 1) +
+  coord_fixed()+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=2),
+        plot.margin=unit(c(0.1,0,0,0),"cm"))+
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5, 
+                                   size = 8, colour ="Black"))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_continuous(expand = c(0, 0)) +
+  annotation_scale(location = "tl", width_hint = 0.2, 
+                   pad_x = unit(0.1, "in"), pad_y = unit(0.8, "in"))+
+  annotation_north_arrow(location = "tl", which_north = "true", 
+                         pad_x = unit(0.3, "in"), pad_y = unit(0.1, "in"),
+                         style = north_arrow_fancy_orienteering)
+#dev.off()
+```
+
+*** 
+
+# Taquara
+
+```{r}
+load("cpt_taquara.rda")
+```
+
+# Finding the best value of "q". 
+
+## Converting "data" to factor:
+```{r}
+data_taquara$date <- as.factor(data_taquara$date)
+class(data_taquara$date)
+days <- levels(data_taquara$date); head(days)
+```
+
+
+## Creating an output datafame with a a column "q" for printing the "q" values which I am testing.
+```{r}
+output_taquara <- data_taquara
+output_taquara$CP <- ""
+output_taquara$q <- ""
+output_taquara <- output_taquara[-c(1:nrow(output_taquara)),]
+head(output_taquara)
+```
+
+## Now I run the test for all "q" values (1:10) and all 11 days. I also used alpha=0.01, N=10000, and tol=0.
+
+```{r}
+for(date.mlp in days[1:11]) {
+  
+  print(date.mlp)
+  
+  for(q in 1:10) {
+    
+    print(paste(date.mlp, "q =", q))
+    
+    datainp_t <- data_taquara[data_taquara$date == date.mlp,]
+    
+    inp<-matrix(c(0),dim(datainp_t)[1],2)
+    inp<-datainp_t[,6:7]
+    
+    x1<-inp[[1]]
+    x2<-inp[[2]]
+    
+    # Inspect first few rows of the data
+    xy <- cbind(x1,x2)
+    head(xy)
+    
+    # INPUTS
+    # input alpha
+    # alpha = significance level
+    # alpha = 0.01 is a convenient default
+    alpha <- 0.01
+    
+    # input q
+    # Enter value of q
+    # q = 4 is used here just as an example.
+    # The user should replace this by a value of q
+    # that is appropriate for the species and data
+    # considered, e.g. that obtained by running CPT_Rcode
+    # on part of the data.
+    #q <- 6
+    
+    # input N
+    # N = total number of permutations (1 observed and N-1 simulated) 
+    # # N = 10000 is a convenient number
+    N <- 10000
+    
+    # input tol
+    # tol = tolerance
+    # = maximum distance between indistinguishable positions # tol = 0 is a 
+    # convenient default
+    # The user may like to replace this by
+    # twice the average GPS error in research area
+    tol <- 0
+    
+    # PRELIMINARIES
+    # Reverse the time-ordering,
+    # so that (bx1[1], bx2[1]) refers to (final)
+    #  putative goal
+    bx1 <- 0*x1
+    bx2 <- 0*x2
+    
+    n <- length(x1)
+    for (j in 1:n){
+      bx1[j] <- x1[n-j+1]
+      bx2[j] <- x2[n-j+1]
+    }
+    # Calculate the steps (bxdiff1, bxdiff2)
+    bx1diff <- diff(bx1)
+    bx2diff <- diff(bx2)
+    
+    # REMOVE POINTS AT WHICH ANIMAL STAYS STILL
+    # ind is (reverse) time ordering of points
+    # newp > 0 if point differs from previous point
+    tolsq <- tol^2
+    ind <- c(1:n)
+    newp <- c(1:n)
+    for (j in 2:n){
+      newp[j] <- ind[j]*( bx1diff[j-1]^2 + bx2diff[j-1]^2 > tolsq)
+    }
+    
+    # bz1, bz2 are coordinates of points(in reverse time order) 
+    # at which there is movement
+    bz1 <- bx1[newp >0]
+    bz2 <- bx2[newp >0]
+    nz <- length(bz1)
+    
+    # We shall apply the CPT to points with coordinates (bz1,bz2)
+    # Calculate the steps (bzdiff1, bzdiff2)
+    bz1diff <- diff(bz1)
+    bz2diff <- diff(bz2)
+    # SOME DECLARATIONS
+    # goal.no = number (from end) of current putative goal 
+    # (with goal.no = 1 for end position
+    
+    # Thus goal.no = goal.t + 1
+    # where goal.t was used in original code to refer to
+    # time of current putative goal (with goal.t = 0 
+    # for # end position # start with goal.no = 1
+    goal.no <- 1
+    
+    # last.no = number (backwards in time) of last position of 
+    # interest # last.no = length(bz1) is a convenient default
+    # (and includes all the positions)
+    last.no <- length(bz1)
+    no.of.nos <- length(bz1)
+    Rsumrand  <- rep(0, len=N)
+    Rsumrandr <- rep(0, len=N)
+    
+    # Pr will store observed p-values in a run of r
+    Pr <- rep(1, len=no.of.nos)
+    
+    # sig is a vector indicating whether or not
+    # waypoint k is detected as a possible change point: 
+    # sig[k] = 1 if change point detected at waypoint k 
+    # sig[k] = 0 otherwise
+    sig <- rep(0,nz)
+    
+    # k is number of steps in "k-leg"
+    k <- 0
+    
+    # LOOK (SEQUENTIALLY) FOR NEXT POSSIBLE CHANGE POINT 
+    
+    while(goal.no < last.no - q){
+      
+      print(goal.no)
+      
+      k <- 0
+      
+      # INCREASE k UNTIL NEXT POSSIBLE CHANGE POINT IS FOUND 
+      # Re-initialise Pr
+      Pr <- 0*Pr + 1
+      P <- 1
+      
+      while ((P > alpha) && (goal.no + q + k < last.no)){ 
+        #B
+        
+        k <- k + 1
+        
+        R1 <- sqrt((bz1[goal.no+k] - bz1[goal.no])^2 + (bz2[goal.no+k] - 
+                                                          bz2[goal.no])^2) 
+        R2 <- sqrt((bz1[goal.no+k+q] - bz1[goal.no+k])^2 + (bz2[goal.no+k+q] - 
+                                                              bz2[goal.no+k])^2)
+        Rsum <- R1 + R2
+        
+        # Rsumrand[1] = observed value of statistic R1 + R2 
+        Rsumrand[1] <- Rsum
+        
+        # Now calculate statistic R1 + R2 for a further N-1 
+        # random permutations and store in Rsumrand
+        for (it in 2:N){
+          # start of it loop C
+          u <- runif(k+q,0,1)
+          perm <- order(u)
+          bz1r <- bz1[goal.no]
+          bz2r <- bz2[goal.no]
+          for (j in 1:k){ # start of j loop D 
+            bz1r <- bz1r + bz1diff[goal.no-1+perm[j]] 
+            bz2r <- bz2r + bz2diff[goal.no-1+perm[j]]
+          } # end of j loop D
+          
+          R1rand <- sqrt((bz1r - bz1[goal.no])^2 + (bz2r - bz2[goal.no])^2)
+          R2rand <- sqrt((bz1[goal.no+k+q] - bz1r)^2 + 
+                           (bz2[goal.no+k+q] - bz2r)^2) 
+          Rsumrand[it] <- R1rand + R2rand
+        } # end of it loop C
+        
+        P <- sum(Rsumrand >= Rsum)/N
+        
+        Pr[k] <- P
+        
+      } # end of "while" on
+      # ((P > alpha) && (goal.no + q + k < last.no)) B
+      # f is the first value of k in the current run that is significant 
+      f <- k
+      
+      while ((P <= alpha) && (goal.no + q + k < last.no)){ 
+        #E
+        
+        k <- k+1
+        R1 <- sqrt((bz1[goal.no+k] - bz1[goal.no])^2 + 
+                     (bz2[goal.no+k] - bz2[goal.no])^2)
+        
+        R2 <- sqrt((bz1[goal.no+k+q] - bz1[goal.no+k])^2 + 
+                     (bz2[goal.no+k+q] - bz2[goal.no+k])^2)
+        
+        Rsum <- R1 + R2
+        
+        # Rsumrand[1] = observed value of statistic R1 + R2 
+        Rsumrand[1] <- Rsum
+        
+        # Now calculate statistic R1 + R2 for a further N-1 
+        # random permutations and store in Rsumrand
+        for (it in 2:N){ # start of it loop F
+          u <- runif(k+q,0,1)
+          perm <- order(u)
+          bz1r <- bz1[goal.no]
+          bz2r <- bz2[goal.no]
+          for (j in 1:k){ # start of j loop G 
+            bz1r <- bz1r + bz1diff[goal.no-1+perm[j]] 
+            bz2r <- bz2r + bz2diff[goal.no-1+perm[j]]
+          } # end of j loop G
+          
+          R1rand <- sqrt((bz1r - bz1[goal.no])^2 + 
+                           (bz2r - bz2[goal.no])^2)
+          R2rand <- sqrt((bz1[goal.no+k+q] - bz1r)^2 + 
+                           (bz2[goal.no+k+q] - bz2r)^2)      
+          Rsumrand[it] <- R1rand + R2rand
+        } # end of it loop F
+        
+        P <- sum(Rsumrand >= Rsum)/N
+        
+        Pr[k] <- P
+        
+      }  # end of "while" on
+      
+      # ((P < alpha) && (goal.no + q + k < last.no)) E
+      
+      # l is the last value of k in the current run that is significant 
+      l <- k - 1
+      
+      # apply "peak rule"
+      Pr[f:l]
+      rmin <- min(which(Pr[f:l] == min(Pr[f:l]))) 
+      rmin <- if(l >=f) rmin else 0
+      
+      goal.no <- ifelse(rmin > 0, goal.no + f + rmin - 1, last.no) 
+      
+      sig[goal.no] <- ifelse(goal.no == last.no,0,1)
+      
+    } # end of "while" on (goal.no < last.no - q) # A
+    
+    #  Remove putative goal from list of CP's
+    sig[1] <- 0
+    
+    # OUTPUTS
+    
+    # OUTPUT OF
+    # (first, last) (row nos. of first and last times at 
+    # "significant" change points)
+    # (east, north) (their coordinates)
+    # cp lists indices of waypoints identified as change points
+    cp <- which(sig==1)
+    
+    
+    # bsig is sig in reverse time-order
+    bsig <- rep(0,nz)
+    for (j in 1:nz){
+      bsig[j] <- sig[nz-j+1]
+    }
+    
+    # "times" (row nos.) and coordinates of change points 
+    newpp <- newp[newp > tol]
+    cp.time <- newpp[sig==1]
+    cp.bx1 <- bz1[sig==1]
+    cp.bx2 <- bz2[sig==1]
+    cp.no <- n + 1 - cp.time
+    # last is cp.no in reverse order
+    last <- 0*cp.no
+    cp.leng <- length(cp.no)
+    for (j in 1:cp.leng){
+      last[j] <- cp.no[cp.leng-j+1]
+    }
+    # last contains row nos. of (last times at) change points 
+    # (east, north) are their coordinates
+    east <- x2[last]
+    north <- x1[last]
+    
+    # first contains row nos. of first times at change points 
+    first <- 0*last
+    for (j in 1:length(last)){
+      first[j] <- n+2 - min(which(newp > (n+1-last[j])))
+    }
+    
+    # PLOT WAYPOINTS AND MARK CHANGE POINTS
+    # For plotting purposes, reverse the order of
+    # bz1, bz2 to get z1, z2
+    z1 <- 0*bz1
+    z2 <- 0*bz2
+    nz <- length(z1)
+    for (j in 1:nz){
+      z1[j] <- bz1[nz-j+1]
+      z2[j] <- bz2[nz-j+1]
+    }
+    # s is vector to index the points
+    s <- c(1:nz)
+    
+    # Save change-points
+    z1bsig <- z1[bsig==1]# Latitude of CPs
+    z2bsig <- z2[bsig==1]# Longitude of CPs
+    cpsame <- which(first == last)
+    cpdiff <- which(first != last)
+    lastsame <- last[cpsame]# Number of lines where CPs are located 
+    firstdiff <- first[cpdiff]
+    lastdiff <- last[cpdiff]
+    z1bsame <- z1bsig[cpsame]
+    z2bsame <- z2bsig[cpsame]
+    z1bdiff <- z1bsig[cpdiff]
+    z2bdiff <- z2bsig[cpdiff]
+    
+    
+    # create a new column
+    datainp_t$cp <- "NO-CP"; head(datainp_t)
+    # Fill CPs in the change point locations
+    true.index <- which((datainp_t$longitude %in% z2bsig) & 
+                          (datainp_t$latitude %in% z1bsig))
+    datainp_t$cp[true.index] <- "CP"
+    
+    # fill q value
+    datainp_t$q <- q
+    
+    # plot
+    plot(datainp_t$longitude, datainp_t$latitude, pch = 19, 
+         main = datainp_t$date[1])
+    # lines
+    lines(datainp_t$longitude, datainp_t$latitude)
+    points(datainp_t[datainp_t$cp == "CP",]$longitude, 
+           datainp_t[datainp_t$cp == "CP",]$latitude, pch = 19, col = 2)
+    
+    output_taquara <- rbind(output_taquara, datainp_t)
+  }
+}
+```
+
+## Filtering duplicated lines so I don't count more than once the same "CP"
+```{r}
+output_taquara_filter<- output_taquara[,-c(1,3,4,5)]
+head(output_taquara_filter)
+output_taquara_filter<- output_taquara_filter[!duplicated
+                                              (output_taquara_filter), ]
+head(output_taquara_filter)
+```
+
+## Summary to understand the number of "CPs" according to value of "q"
+```{r}
+count_cps_taquara <- output_taquara_filter %>% 
+  dplyr::group_by(date, q) %>% 
+  dplyr::summarize(number.of.CPs = sum(cp == "CP"))
+head(count_cps_taquara)
+```
+
+## Now I organize the data into wide format to plot and understand what is the best value of "q" to use:
+```{r}
+count_cps_taquara_wide <- spread(count_cps_taquara, key = date, 
+                                value = number.of.CPs)
+# Create "total"TOTAL" column with sum or row values:
+count_cps_taquara_wide <- count_cps_taquara_wide %>%
+  mutate(TOTAL=rowSums(.[setdiff(names(.),"q")]))
+# Converting to data.frame:
+count_cps_taquara_wide<-as.data.frame(count_cps_taquara_wide)
+```
+
+## Ploting "q" for Taquara:
+
+### Plot of number of CPs per day according to values of "q" from 1 to 10. Light-gray lines represent number of CPs for each value of "q" in a unique day. Thick black line represent the sum of CPs for each value of "q" in all days.
+```{r}
+par(mfrow=c(1,1))
+plot(count_cps_taquara_wide[,"q"],count_cps_taquara_wide[,"03/12/17"],
+     type="o",pch=20,
+     col="gray85",xlab="q",ylab ="Number of change- points",
+     xlim=c(1,max(count_cps_taquara_wide[,"q"])),
+     ylim=c(1,max(count_cps_taquara_wide)),lab=c(10,20,0))
+points(count_cps_taquara_wide[,"q"],count_cps_taquara_wide[,"27/01/18"],
+       type="o",pch=20,col="gray85")
+points(count_cps_taquara_wide[,"q"],count_cps_taquara_wide[,"28/01/18"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_taquara_wide[,"q"],count_cps_taquara_wide[,"29/01/18"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_taquara_wide[,"q"],count_cps_taquara_wide[,"30/01/18"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_taquara_wide[,"q"],count_cps_taquara_wide[,"31/01/18"],
+       type="o",pch=20,col="gray85")
+points(count_cps_taquara_wide[,"q"],count_cps_taquara_wide[,"03/02/18"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_taquara_wide[,"q"],count_cps_taquara_wide[,"02/05/18"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_taquara_wide[,"q"],count_cps_taquara_wide[,"04/07/18"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_taquara_wide[,"q"],count_cps_taquara_wide[,"05/07/18"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_taquara_wide[,"q"],count_cps_taquara_wide[,"18/09/18"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_taquara_wide[,"q"],count_cps_taquara_wide[,"TOTAL"],
+       type="o",pch=20,col="black", lwd=3)
+```
+
+## It looks like q = 5 is the best for running the analysis, since it is the last value at which the number of CPs increases continuously. 
+
+## After finding q, I just have to create a subset of my "output_taquara" file with q = 5.
+```{r}
+cpt_taquara <- subset(output_taquara, q == 5)
+cpt_taquara <- subset(cpt_taquara, select = -id)
+cpt_taquara$id <- 1:nrow(cpt_taquara)
+cpt_taquara<-cpt_taquara[,c(9,1,2,3,4,5,6,7,8)]
+head(cpt_taquara)
+```
+
+***
+
+# Here I present the plot with all identified CPs and associated behaviors in Morro do Diabo (Taquara) Also, I plot here 2 different zones (territory border and core area). For this, I have worked in the dataframes in excel previously to organize the data acoordingly.
+
+### Identification of behaviors associated with direction change (CPs) along black lion tamarins' daily routes in Morro do Diabo (Taquara). Red circles = locomotion (44%), pink triangles = frugivory (24%), green squares = resting (15%), cyan diamonds = foraging (8%), purple squares = gummivory (7%), light-yellow star = inactive (2%). Little black dots and lines repesent GPS points recorded every 5 minutes.
+
+```{r}
+#tiff(".tiff", width = 11000, height = 6500, res = 1000)
+ggplot()+
+  geom_polygon(data = forest_taquara, aes(x=long, y= lat, group=group),
+               fill = "darkgreen", size = 1)+
+  geom_polygon(data = hr_taquara, aes(x=long, y= lat, group=group),
+               fill = "palegreen4", colour = "black", size = 1)+
+  geom_polygon(data = frabordf_taquara, aes(x=long, y= lat, group=group),
+               fill = "mediumseagreen", colour = "black", size = .5)+
+  geom_polygon(data = terbordf_taquara, aes(x=long, y= lat, group=group),
+               fill = "yellowgreen", colour = "black") +
+  geom_polygon(data = river_taquara, aes(x=long, y= lat, group=group),
+               fill = "cadetblue1", colour = "black", size = 1) +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, size=2))+
+  geom_point(data = output.taquara1, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.taquara1, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.taquara2, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.taquara2, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.taquara3, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.taquara3, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.taquara4, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.taquara4, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.taquara5, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.taquara5, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.taquara6, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.taquara6, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.taquara7, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.taquara7, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.taquara8, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.taquara8, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.taquara9, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.taquara9, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.taquara10, aes(x = longitude, 
+                                          y = latitude), size = 1) +
+  geom_path(data = output.taquara10, aes(x = longitude, 
+                                         y = latitude), size = 0.2) +
+  geom_point(data = output.taquara11, aes(x = longitude, 
+                                          y = latitude), size = 1) +
+  geom_path(data = output.taquara11, aes(x = longitude, 
+                                         y = latitude), size = 0.2) +
+  geom_point(data = output.taquara[output.taquara$cpout == "x",], 
+             aes(x = longitude, y = latitude), col = "darkorchid2", 
+             shape = 3, size = 3.5, stroke = 1.5 )+
+  geom_point(data = output.taquara[output.taquara$cpidle == "x",], 
+             aes(x = longitude, y = latitude), col = "cornsilk", 
+             shape = 8, size = 4, stroke = 1)+
+  geom_point(data = output.taquara[output.taquara$cpres == "x",], 
+             aes(x = longitude, y = latitude), fill = "chartreuse2", 
+             shape = 22, size = 4, stroke = 1)+
+  geom_point(data = output.taquara[output.taquara$cpagonin == "x",], 
+             aes(x = longitude, y = latitude), fill = "coral", 
+             shape = 25, size = 4, stroke = 1)+
+  geom_point(data = output.taquara[output.taquara$cpgum == "x",], 
+             aes(x = longitude, y = latitude), fill = "purple", 
+             shape = 22, size = 4, stroke = 1) +
+  geom_point(data = output.taquara[output.taquara$cplocom == "x",], 
+             aes(x = longitude, y = latitude), fill = "red", 
+             shape = 21, size = 4, stroke = 1)+
+  geom_point(data = output.taquara[output.taquara$cpfor == "x",], 
+             aes(x = longitude, y = latitude), fill = "cyan", 
+             shape = 23, size = 4, stroke = 1)+
+  geom_point(data = output.taquara[output.taquara$cpffru == "x",], 
+             aes(x = longitude, y = latitude), fill = "pink", 
+             shape = 24, size = 4, stroke = 1)+
+  geom_point(data = output.taquara[output.taquara$cprubb == "x",], 
+             aes(x = longitude, y = latitude), fill = "aliceblue", 
+             shape = 21, size = 4, stroke = 1) +
+  coord_fixed()+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=2),
+        plot.margin=unit(c(0.1,0,0,0),"cm"))+
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5, 
+                                   size = 8, colour ="Black"))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_continuous(expand = c(0, 0)) +
+  annotation_scale(location = "tr", width_hint = 0.2, 
+                   pad_x = unit(0.1, "in"), pad_y = unit(0.8, "in"))+
+  annotation_north_arrow(location = "tr", which_north = "true", 
+                         pad_x = unit(0.3, "in"), pad_y = unit(0.1, "in"),
+                         style = north_arrow_fancy_orienteering)
+#dev.off()
+```
+
+
+***
+
+# Suzano
+
+```{r}
+load("cpt_suzano.rda")
+```
+
+# Finding the best value of "q". 
+
+## Converting "data" to factor:
+```{r}
+data_suzano$date <- as.factor(data_suzano$date)
+class(data_suzano$date)
+days <- levels(data_suzano$date); head(days)
+```
+
+
+## Creating an output datafame with a a column "q" for printing the "q" values which I am testing.
+```{r}
+output_suzano <- data_suzano
+output_suzano$CP <- ""
+output_suzano$q <- ""
+output_suzano <- output_suzano[-c(1:nrow(output_suzano)),]
+head(output_suzano)
+```
+
+## Now I run the test for all "q" values (1:10) and all 11 days. I also used alpha=0.01, N=10000, and tol=0.
+
+```{r}
+for(date.mlp in days[1:13]) {
+  
+  print(date.mlp)
+  
+  for(q in 1:10) {
+    
+    print(paste(date.mlp, "q =", q))
+    
+    datainp_s <- data_suzano[data_suzano$date == date.mlp,]
+    
+    inp<-matrix(c(0),dim(datainp_s)[1],2)
+    inp<-datainp_s[,6:7]
+    
+    x1<-inp[[1]]
+    x2<-inp[[2]]
+    
+    # Inspect first few rows of the data
+    xy <- cbind(x1,x2)
+    head(xy)
+    
+    # INPUTS
+    # input alpha
+    # alpha = significance level
+    # alpha = 0.01 is a convenient default
+    alpha <- 0.01
+    
+    # input q
+    # Enter value of q
+    # q = 4 is used here just as an example.
+    # The user should replace this by a value of q
+    # that is appropriate for the species and data
+    # considered, e.g. that obtained by running CPT_Rcode
+    # on part of the data.
+    #q <- 6
+    
+    # input N
+    # N = total number of permutations (1 observed and N-1 simulated) 
+    # # N = 10000 is a convenient number
+    N <- 10000
+    
+    # input tol
+    # tol = tolerance
+    # = maximum distance between indistinguishable positions # tol = 0 is a 
+    # convenient default
+    # The user may like to replace this by
+    # twice the average GPS error in research area
+    tol <- 0
+    
+    # PRELIMINARIES
+    # Reverse the time-ordering,
+    # so that (bx1[1], bx2[1]) refers to (final)
+    #  putative goal
+    bx1 <- 0*x1
+    bx2 <- 0*x2
+    
+    n <- length(x1)
+    for (j in 1:n){
+      bx1[j] <- x1[n-j+1]
+      bx2[j] <- x2[n-j+1]
+    }
+    # Calculate the steps (bxdiff1, bxdiff2)
+    bx1diff <- diff(bx1)
+    bx2diff <- diff(bx2)
+    
+    # REMOVE POINTS AT WHICH ANIMAL STAYS STILL
+    # ind is (reverse) time ordering of points
+    # newp > 0 if point differs from previous point
+    tolsq <- tol^2
+    ind <- c(1:n)
+    newp <- c(1:n)
+    for (j in 2:n){
+      newp[j] <- ind[j]*( bx1diff[j-1]^2 + bx2diff[j-1]^2 > tolsq)
+    }
+    
+    # bz1, bz2 are coordinates of points(in reverse time order) 
+    # at which there is movement
+    bz1 <- bx1[newp >0]
+    bz2 <- bx2[newp >0]
+    nz <- length(bz1)
+    
+    # We shall apply the CPT to points with coordinates (bz1,bz2)
+    # Calculate the steps (bzdiff1, bzdiff2)
+    bz1diff <- diff(bz1)
+    bz2diff <- diff(bz2)
+    # SOME DECLARATIONS
+    # goal.no = number (from end) of current putative goal 
+    # (with goal.no = 1 for end position
+    
+    # Thus goal.no = goal.t + 1
+    # where goal.t was used in original code to refer to
+    # time of current putative goal (with goal.t = 0 
+    # for # end position # start with goal.no = 1
+    goal.no <- 1
+    
+    # last.no = number (backwards in time) of last position of 
+    # interest # last.no = length(bz1) is a convenient default
+    # (and includes all the positions)
+    last.no <- length(bz1)
+    no.of.nos <- length(bz1)
+    Rsumrand  <- rep(0, len=N)
+    Rsumrandr <- rep(0, len=N)
+    
+    # Pr will store observed p-values in a run of r
+    Pr <- rep(1, len=no.of.nos)
+    
+    # sig is a vector indicating whether or not
+    # waypoint k is detected as a possible change point: 
+    # sig[k] = 1 if change point detected at waypoint k 
+    # sig[k] = 0 otherwise
+    sig <- rep(0,nz)
+    
+    # k is number of steps in "k-leg"
+    k <- 0
+    
+    # LOOK (SEQUENTIALLY) FOR NEXT POSSIBLE CHANGE POINT 
+    
+    while(goal.no < last.no - q){
+      
+      print(goal.no)
+      
+      k <- 0
+      
+      # INCREASE k UNTIL NEXT POSSIBLE CHANGE POINT IS FOUND 
+      # Re-initialise Pr
+      Pr <- 0*Pr + 1
+      P <- 1
+      
+      while ((P > alpha) && (goal.no + q + k < last.no)){ 
+        #B
+        
+        k <- k + 1
+        
+        R1 <- sqrt((bz1[goal.no+k] - bz1[goal.no])^2 + (bz2[goal.no+k] - 
+                                                          bz2[goal.no])^2) 
+        R2 <- sqrt((bz1[goal.no+k+q] - bz1[goal.no+k])^2 + (bz2[goal.no+k+q] - 
+                                                              bz2[goal.no+k])^2)
+        Rsum <- R1 + R2
+        
+        # Rsumrand[1] = observed value of statistic R1 + R2 
+        Rsumrand[1] <- Rsum
+        
+        # Now calculate statistic R1 + R2 for a further N-1 
+        # random permutations and store in Rsumrand
+        for (it in 2:N){
+          # start of it loop C
+          u <- runif(k+q,0,1)
+          perm <- order(u)
+          bz1r <- bz1[goal.no]
+          bz2r <- bz2[goal.no]
+          for (j in 1:k){ # start of j loop D 
+            bz1r <- bz1r + bz1diff[goal.no-1+perm[j]] 
+            bz2r <- bz2r + bz2diff[goal.no-1+perm[j]]
+          } # end of j loop D
+          
+          R1rand <- sqrt((bz1r - bz1[goal.no])^2 + (bz2r - bz2[goal.no])^2)
+          R2rand <- sqrt((bz1[goal.no+k+q] - bz1r)^2 + 
+                           (bz2[goal.no+k+q] - bz2r)^2) 
+          Rsumrand[it] <- R1rand + R2rand
+        } # end of it loop C
+        
+        P <- sum(Rsumrand >= Rsum)/N
+        
+        Pr[k] <- P
+        
+      } # end of "while" on
+      # ((P > alpha) && (goal.no + q + k < last.no)) B
+      # f is the first value of k in the current run that is significant 
+      f <- k
+      
+      while ((P <= alpha) && (goal.no + q + k < last.no)){ 
+        #E
+        
+        k <- k+1
+        R1 <- sqrt((bz1[goal.no+k] - bz1[goal.no])^2 + 
+                     (bz2[goal.no+k] - bz2[goal.no])^2)
+        
+        R2 <- sqrt((bz1[goal.no+k+q] - bz1[goal.no+k])^2 + 
+                     (bz2[goal.no+k+q] - bz2[goal.no+k])^2)
+        
+        Rsum <- R1 + R2
+        
+        # Rsumrand[1] = observed value of statistic R1 + R2 
+        Rsumrand[1] <- Rsum
+        
+        # Now calculate statistic R1 + R2 for a further N-1 
+        # random permutations and store in Rsumrand
+        for (it in 2:N){ # start of it loop F
+          u <- runif(k+q,0,1)
+          perm <- order(u)
+          bz1r <- bz1[goal.no]
+          bz2r <- bz2[goal.no]
+          for (j in 1:k){ # start of j loop G 
+            bz1r <- bz1r + bz1diff[goal.no-1+perm[j]] 
+            bz2r <- bz2r + bz2diff[goal.no-1+perm[j]]
+          } # end of j loop G
+          
+          R1rand <- sqrt((bz1r - bz1[goal.no])^2 + 
+                           (bz2r - bz2[goal.no])^2)
+          R2rand <- sqrt((bz1[goal.no+k+q] - bz1r)^2 + 
+                           (bz2[goal.no+k+q] - bz2r)^2)      
+          Rsumrand[it] <- R1rand + R2rand
+        } # end of it loop F
+        
+        P <- sum(Rsumrand >= Rsum)/N
+        
+        Pr[k] <- P
+        
+      }  # end of "while" on
+      
+      # ((P < alpha) && (goal.no + q + k < last.no)) E
+      
+      # l is the last value of k in the current run that is significant 
+      l <- k - 1
+      
+      # apply "peak rule"
+      Pr[f:l]
+      rmin <- min(which(Pr[f:l] == min(Pr[f:l]))) 
+      rmin <- if(l >=f) rmin else 0
+      
+      goal.no <- ifelse(rmin > 0, goal.no + f + rmin - 1, last.no) 
+      
+      sig[goal.no] <- ifelse(goal.no == last.no,0,1)
+      
+    } # end of "while" on (goal.no < last.no - q) # A
+    
+    #  Remove putative goal from list of CP's
+    sig[1] <- 0
+    
+    # OUTPUTS
+    
+    # OUTPUT OF
+    # (first, last) (row nos. of first and last times at 
+    # "significant" change points)
+    # (east, north) (their coordinates)
+    # cp lists indices of waypoints identified as change points
+    cp <- which(sig==1)
+    
+    
+    # bsig is sig in reverse time-order
+    bsig <- rep(0,nz)
+    for (j in 1:nz){
+      bsig[j] <- sig[nz-j+1]
+    }
+    
+    # "times" (row nos.) and coordinates of change points 
+    newpp <- newp[newp > tol]
+    cp.time <- newpp[sig==1]
+    cp.bx1 <- bz1[sig==1]
+    cp.bx2 <- bz2[sig==1]
+    cp.no <- n + 1 - cp.time
+    # last is cp.no in reverse order
+    last <- 0*cp.no
+    cp.leng <- length(cp.no)
+    for (j in 1:cp.leng){
+      last[j] <- cp.no[cp.leng-j+1]
+    }
+    # last contains row nos. of (last times at) change points 
+    # (east, north) are their coordinates
+    east <- x2[last]
+    north <- x1[last]
+    
+    # first contains row nos. of first times at change points 
+    first <- 0*last
+    for (j in 1:length(last)){
+      first[j] <- n+2 - min(which(newp > (n+1-last[j])))
+    }
+    
+    # PLOT WAYPOINTS AND MARK CHANGE POINTS
+    # For plotting purposes, reverse the order of
+    # bz1, bz2 to get z1, z2
+    z1 <- 0*bz1
+    z2 <- 0*bz2
+    nz <- length(z1)
+    for (j in 1:nz){
+      z1[j] <- bz1[nz-j+1]
+      z2[j] <- bz2[nz-j+1]
+    }
+    # s is vector to index the points
+    s <- c(1:nz)
+    
+    # Save change-points
+    z1bsig <- z1[bsig==1]# Latitude of CPs
+    z2bsig <- z2[bsig==1]# Longitude of CPs
+    cpsame <- which(first == last)
+    cpdiff <- which(first != last)
+    lastsame <- last[cpsame]# Number of lines where CPs are located 
+    firstdiff <- first[cpdiff]
+    lastdiff <- last[cpdiff]
+    z1bsame <- z1bsig[cpsame]
+    z2bsame <- z2bsig[cpsame]
+    z1bdiff <- z1bsig[cpdiff]
+    z2bdiff <- z2bsig[cpdiff]
+    
+    
+    # create a new column
+    datainp_s$cp <- "NO-CP"; head(datainp_s)
+    # Fill CPs in the change point locations
+    true.index <- which((datainp_s$longitude %in% z2bsig) & 
+                          (datainp_s$latitude %in% z1bsig))
+    datainp_s$cp[true.index] <- "CP"
+    
+    # fill q value
+    datainp_s$q <- q
+    
+    # plot
+    plot(datainp_s$longitude, datainp_s$latitude, pch = 19, 
+         main = datainp_s$date[1])
+    # lines
+    lines(datainp_s$longitude, datainp_s$latitude)
+    points(datainp_s[datainp_s$cp == "CP",]$longitude, 
+           datainp_s[datainp_s$cp == "CP",]$latitude, pch = 19, col = 2)
+    
+    output_suzano <- rbind(output_suzano, datainp_s)
+  }
+}
+```
+
+## Filtering duplicated lines so I don't count more than once the same "CP"
+```{r}
+output_suzano_filter<- output_suzano[,-c(1,3,4,5)]
+head(output_suzano_filter)
+output_suzano_filter<- output_suzano_filter[!duplicated
+                                              (output_suzano_filter), ]
+head(output_suzano_filter)
+```
+
+## Summary to understand the number of "CPs" according to value of "q"
+```{r}
+count_cps_suzano <- output_suzano_filter %>% 
+  dplyr::group_by(date, q) %>% 
+  dplyr::summarize(number.of.CPs = sum(cp == "CP"))
+head(count_cps_suzano)
+```
+
+## Now I organize the data into wide format to plot and understand what is the best value of "q" to use:
+```{r}
+count_cps_suzano_wide <- spread(count_cps_suzano, key = date, 
+                                value = number.of.CPs)
+# Create "total"TOTAL" column with sum or row values:
+count_cps_suzano_wide <- count_cps_suzano_wide %>%
+  mutate(TOTAL=rowSums(.[setdiff(names(.),"q")]))
+# Converting to data.frame:
+count_cps_suzano_wide<-as.data.frame(count_cps_suzano_wide)
+```
+
+## Ploting "q" for Suzano:
+
+### Plot of number of CPs per day according to values of "q" from 1 to 10. Light-gray lines represent number of CPs for each value of "q" in a unique day. Thick black line represent the sum of CPs for each value of "q" in all days.
+
+```{r}
+par(mfrow=c(1,1))
+plot(count_cps_suzano_wide[,"q"],count_cps_suzano_wide[,"09/09/18"],
+     type="o",pch=20,
+     col="gray85",xlab="q",ylab ="Number of change- points - Suzano",
+     xlim=c(1,max(count_cps_suzano_wide[,"q"])),
+     ylim=c(1,max(count_cps_suzano_wide)),lab=c(10,20,0))
+points(count_cps_suzano_wide[,"q"],count_cps_suzano_wide[,"10/09/18"],
+       type="o",pch=20,col="gray85")
+points(count_cps_suzano_wide[,"q"],count_cps_suzano_wide[,"11/09/18"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_suzano_wide[,"q"],count_cps_suzano_wide[,"06/12/18"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_suzano_wide[,"q"],count_cps_suzano_wide[,"07/12/18"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_suzano_wide[,"q"],count_cps_suzano_wide[,"08/12/18"],
+       type="o",pch=20,col="gray85")
+points(count_cps_suzano_wide[,"q"],count_cps_suzano_wide[,"09/12/18"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_suzano_wide[,"q"],count_cps_suzano_wide[,"10/12/18"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_suzano_wide[,"q"],count_cps_suzano_wide[,"11/12/18"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_suzano_wide[,"q"],count_cps_suzano_wide[,"19/02/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_suzano_wide[,"q"],count_cps_suzano_wide[,"20/02/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_suzano_wide[,"q"],count_cps_suzano_wide[,"06/04/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_suzano_wide[,"q"],count_cps_suzano_wide[,"12/04/19"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_suzano_wide[,"q"],count_cps_suzano_wide[,"TOTAL"],
+       type="o",pch=20,col="black", lwd=3)
+```
+
+## It looks like q = 5 is the best for running the analysis, since it is the last value at which the number of CPs increases continuously. 
+
+## After finding q, I just have to create a subset of my "output_suzano" file with q = 6.
+```{r}
+cpt_suzano <- subset(output_suzano, q == 5)
+cpt_suzano <- subset(cpt_suzano, select = -id)
+cpt_suzano$id <- 1:nrow(cpt_suzano)
+cpt_suzano<-cpt_suzano[,c(9,1,2,3,4,5,6,7,8)]
+head(cpt_suzano)
+```
+
+***
+
+# Here I present the plot with all identified CPs and associated behaviors in Suzano. Also, I plot here 3 different zones (territory and fragment border and core area). For this, I have worked in the dataframes in excel previously to organize the data acoordingly.
+
+### Identification of behaviors associated with direction change (CPs) along black lion tamarins' daily routes in Suzano. Red circles = locomotion (40%), pink triangles = frugivory (32%), green squares = resting (26%), purple squares = gummivory (2%). Little black dots and lines repesent GPS points recorded every 5 minutes.
+
+```{r}
+#tiff("zuzano_k95_k70.tiff", width = 11000, height = 6500, res = 1000)
+ggplot()+
+  #geom_polygon(data = plantations_suzano, aes(x=long, y= lat, group=group),
+              # fill = "white", colour = "black", size = 1.5)+
+  geom_polygon(data = forest_suzano, aes(x=long, y= lat, group=group),
+               fill = "darkgreen", colour = "black",size = 1)+
+  geom_polygon(data = river_suzano, aes(x=long, y= lat, group=group),
+               fill = "cadetblue1", colour = "black", size = .6) +
+  #geom_polygon(data = frabordf_suzano, aes(x=long, y= lat, group=group),
+               #fill = "mediumseagreen", colour = "black", size = .5)+
+  geom_polygon(data = k95_suz, aes(x=long, y= lat, group=group),
+               fill = "palegreen4", colour = "black", size = .5)+
+  geom_polygon(data = k70_suz, aes(x=long, y= lat, group=group),
+               fill = "yellowgreen", colour = "black") +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, size=2))+
+  geom_point(data = output.suzano1, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.suzano1, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.suzano2, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.suzano2, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.suzano3, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.suzano3, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.suzano4, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.suzano4, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.suzano5, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.suzano5, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.suzano6, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.suzano6, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.suzano7, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.suzano7, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.suzano8, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.suzano8, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.suzano9, aes(x = longitude, 
+                                        y = latitude), size = 1) +
+  geom_path(data = output.suzano9, aes(x = longitude, 
+                                       y = latitude), size = 0.2) +
+  geom_point(data = output.suzano10, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.suzano10, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.suzano11, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.suzano11, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.suzano12, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.suzano12, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.suzano13, aes(x = longitude, 
+                                         y = latitude), size = 1) +
+  geom_path(data = output.suzano13, aes(x = longitude, 
+                                        y = latitude), size = 0.2) +
+  geom_point(data = output.suzano[output.suzano$cplocom == "x",], 
+             aes(x = longitude, y = latitude), fill = "red", 
+             shape = 21, size = 4, stroke = 1)+
+  geom_point(data = output.suzano[output.suzano$cpffru == "x",], 
+             aes(x = longitude, y = latitude), fill = "pink", 
+             shape = 24, size = 4, stroke = 1)+
+  geom_point(data = output.suzano[output.suzano$cpres == "x",], 
+             aes(x = longitude, y = latitude), fill = "chartreuse2", 
+             shape = 22, size = 4, stroke = 1)+  
+  geom_point(data = output.suzano[output.suzano$cpgum == "x",], 
+             aes(x = longitude, y = latitude), fill = "purple", 
+             shape = 22, size = 4, stroke = 1) +
+  coord_fixed()+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=2),
+        plot.margin=unit(c(0.1,0,0,0),"cm"))+
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5, 
+                                   size = 8, colour ="Black"))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_continuous(expand = c(0, 0)) +
+  annotation_scale(location = "tl", width_hint = 0.2, 
+                   pad_x = unit(0.1, "in"), pad_y = unit(0.8, "in"))+
+  annotation_north_arrow(location = "tl", which_north = "true", 
+                         pad_x = unit(0.3, "in"), pad_y = unit(0.1, "in"),
+                         style = north_arrow_fancy_orienteering)
+#dev.off()
+```
+
+# Santa Maria
+
+```{r}
+load("cpt_sma.rda")
+
+forest_sma <- st_read("SantaMaria_FB_plot_2024_02_d12.gpkg")
+forest_sma <- st_coordinates(forest_sma)
+forest_sma <- as.data.frame(forest_sma)
+
+k95_sma <- st_read("sma_akde95.gpkg")
+k95_sma <- st_coordinates(k95_sma)
+k95_sma <- as.data.frame(k95_sma)
+
+k70_sma <- st_read("sma_akde75.gpkg")
+k70_sma <- st_coordinates(k70_sma)
+k70_sma <- as.data.frame(k70_sma)
+```
+
+# Finding the best value of "q". 
+
+## Converting "data" to factor:
+```{r}
+data_sma$date <- as.factor(data_sma$date)
+class(data_sma$date)
+days <- levels(data_sma$date); head(days)
+```
+
+
+## Creating an output datafame with a a column "q" for printing the "q" values which I am testing.
+```{r}
+output_sma <- data_sma
+output_sma$CP <- ""
+output_sma$q <- ""
+output_sma <- output_sma[-c(1:nrow(output_sma)),]
+head(output_sma)
+```
+
+## Now I run the test for all "q" values (1:10) and all 11 days. I also used alpha=0.01, N=10000, and tol=0.
+
+```{r}
+for(date.mlp in days[1:11]) {
+  
+  print(date.mlp)
+  
+  for(q in 1:10) {
+    
+    print(paste(date.mlp, "q =", q))
+    
+    datainp_sma <- data_sma[data_sma$date == date.mlp,]
+    
+    inp<-matrix(c(0),dim(datainp_sma)[1],2)
+    inp<-datainp_sma[,6:7]
+    
+    x1<-inp[[1]]
+    x2<-inp[[2]]
+    
+    # Inspect first few rows of the data
+    xy <- cbind(x1,x2)
+    head(xy)
+    
+    # INPUTS
+    # input alpha
+    # alpha = significance level
+    # alpha = 0.01 is a convenient default
+    alpha <- 0.01
+    
+    # input q
+    # Enter value of q
+    # q = 4 is used here just as an example.
+    # The user should replace this by a value of q
+    # that is appropriate for the species and data
+    # considered, e.g. that obtained by running CPT_Rcode
+    # on part of the data.
+    #q <- 6
+    
+    # input N
+    # N = total number of permutations (1 observed and N-1 simulated) 
+    # # N = 10000 is a convenient number
+    N <- 10000
+    
+    # input tol
+    # tol = tolerance
+    # = maximum distance between indistinguishable positions # tol = 0 is a 
+    # convenient default
+    # The user may like to replace this by
+    # twice the average GPS error in research area
+    tol <- 0
+    
+    # PRELIMINARIES
+    # Reverse the time-ordering,
+    # so that (bx1[1], bx2[1]) refers to (final)
+    #  putative goal
+    bx1 <- 0*x1
+    bx2 <- 0*x2
+    
+    n <- length(x1)
+    for (j in 1:n){
+      bx1[j] <- x1[n-j+1]
+      bx2[j] <- x2[n-j+1]
+    }
+    # Calculate the steps (bxdiff1, bxdiff2)
+    bx1diff <- diff(bx1)
+    bx2diff <- diff(bx2)
+    
+    # REMOVE POINTS AT WHICH ANIMAL STAYS STILL
+    # ind is (reverse) time ordering of points
+    # newp > 0 if point differs from previous point
+    tolsq <- tol^2
+    ind <- c(1:n)
+    newp <- c(1:n)
+    for (j in 2:n){
+      newp[j] <- ind[j]*( bx1diff[j-1]^2 + bx2diff[j-1]^2 > tolsq)
+    }
+    
+    # bz1, bz2 are coordinates of points(in reverse time order) 
+    # at which there is movement
+    bz1 <- bx1[newp >0]
+    bz2 <- bx2[newp >0]
+    nz <- length(bz1)
+    
+    # We shall apply the CPT to points with coordinates (bz1,bz2)
+    # Calculate the steps (bzdiff1, bzdiff2)
+    bz1diff <- diff(bz1)
+    bz2diff <- diff(bz2)
+    # SOME DECLARATIONS
+    # goal.no = number (from end) of current putative goal 
+    # (with goal.no = 1 for end position
+    
+    # Thus goal.no = goal.t + 1
+    # where goal.t was used in original code to refer to
+    # time of current putative goal (with goal.t = 0 
+    # for # end position # start with goal.no = 1
+    goal.no <- 1
+    
+    # last.no = number (backwards in time) of last position of 
+    # interest # last.no = length(bz1) is a convenient default
+    # (and includes all the positions)
+    last.no <- length(bz1)
+    no.of.nos <- length(bz1)
+    Rsumrand  <- rep(0, len=N)
+    Rsumrandr <- rep(0, len=N)
+    
+    # Pr will store observed p-values in a run of r
+    Pr <- rep(1, len=no.of.nos)
+    
+    # sig is a vector indicating whether or not
+    # waypoint k is detected as a possible change point: 
+    # sig[k] = 1 if change point detected at waypoint k 
+    # sig[k] = 0 otherwise
+    sig <- rep(0,nz)
+    
+    # k is number of steps in "k-leg"
+    k <- 0
+    
+    # LOOK (SEQUENTIALLY) FOR NEXT POSSIBLE CHANGE POINT 
+    
+    while(goal.no < last.no - q){
+      
+      print(goal.no)
+      
+      k <- 0
+      
+      # INCREASE k UNTIL NEXT POSSIBLE CHANGE POINT IS FOUND 
+      # Re-initialise Pr
+      Pr <- 0*Pr + 1
+      P <- 1
+      
+      while ((P > alpha) && (goal.no + q + k < last.no)){ 
+        #B
+        
+        k <- k + 1
+        
+        R1 <- sqrt((bz1[goal.no+k] - bz1[goal.no])^2 + (bz2[goal.no+k] - 
+                                                          bz2[goal.no])^2) 
+        R2 <- sqrt((bz1[goal.no+k+q] - bz1[goal.no+k])^2 + (bz2[goal.no+k+q] - 
+                                                              bz2[goal.no+k])^2)
+        Rsum <- R1 + R2
+        
+        # Rsumrand[1] = observed value of statistic R1 + R2 
+        Rsumrand[1] <- Rsum
+        
+        # Now calculate statistic R1 + R2 for a further N-1 
+        # random permutations and store in Rsumrand
+        for (it in 2:N){
+          # start of it loop C
+          u <- runif(k+q,0,1)
+          perm <- order(u)
+          bz1r <- bz1[goal.no]
+          bz2r <- bz2[goal.no]
+          for (j in 1:k){ # start of j loop D 
+            bz1r <- bz1r + bz1diff[goal.no-1+perm[j]] 
+            bz2r <- bz2r + bz2diff[goal.no-1+perm[j]]
+          } # end of j loop D
+          
+          R1rand <- sqrt((bz1r - bz1[goal.no])^2 + (bz2r - bz2[goal.no])^2)
+          R2rand <- sqrt((bz1[goal.no+k+q] - bz1r)^2 + 
+                           (bz2[goal.no+k+q] - bz2r)^2) 
+          Rsumrand[it] <- R1rand + R2rand
+        } # end of it loop C
+        
+        P <- sum(Rsumrand >= Rsum)/N
+        
+        Pr[k] <- P
+        
+      } # end of "while" on
+      # ((P > alpha) && (goal.no + q + k < last.no)) B
+      # f is the first value of k in the current run that is significant 
+      f <- k
+      
+      while ((P <= alpha) && (goal.no + q + k < last.no)){ 
+        #E
+        
+        k <- k+1
+        R1 <- sqrt((bz1[goal.no+k] - bz1[goal.no])^2 + 
+                     (bz2[goal.no+k] - bz2[goal.no])^2)
+        
+        R2 <- sqrt((bz1[goal.no+k+q] - bz1[goal.no+k])^2 + 
+                     (bz2[goal.no+k+q] - bz2[goal.no+k])^2)
+        
+        Rsum <- R1 + R2
+        
+        # Rsumrand[1] = observed value of statistic R1 + R2 
+        Rsumrand[1] <- Rsum
+        
+        # Now calculate statistic R1 + R2 for a further N-1 
+        # random permutations and store in Rsumrand
+        for (it in 2:N){ # start of it loop F
+          u <- runif(k+q,0,1)
+          perm <- order(u)
+          bz1r <- bz1[goal.no]
+          bz2r <- bz2[goal.no]
+          for (j in 1:k){ # start of j loop G 
+            bz1r <- bz1r + bz1diff[goal.no-1+perm[j]] 
+            bz2r <- bz2r + bz2diff[goal.no-1+perm[j]]
+          } # end of j loop G
+          
+          R1rand <- sqrt((bz1r - bz1[goal.no])^2 + 
+                           (bz2r - bz2[goal.no])^2)
+          R2rand <- sqrt((bz1[goal.no+k+q] - bz1r)^2 + 
+                           (bz2[goal.no+k+q] - bz2r)^2)      
+          Rsumrand[it] <- R1rand + R2rand
+        } # end of it loop F
+        
+        P <- sum(Rsumrand >= Rsum)/N
+        
+        Pr[k] <- P
+        
+      }  # end of "while" on
+      
+      # ((P < alpha) && (goal.no + q + k < last.no)) E
+      
+      # l is the last value of k in the current run that is significant 
+      l <- k - 1
+      
+      # apply "peak rule"
+      Pr[f:l]
+      rmin <- min(which(Pr[f:l] == min(Pr[f:l]))) 
+      rmin <- if(l >=f) rmin else 0
+      
+      goal.no <- ifelse(rmin > 0, goal.no + f + rmin - 1, last.no) 
+      
+      sig[goal.no] <- ifelse(goal.no == last.no,0,1)
+      
+    } # end of "while" on (goal.no < last.no - q) # A
+    
+    #  Remove putative goal from list of CP's
+    sig[1] <- 0
+    
+    # OUTPUTS
+    
+    # OUTPUT OF
+    # (first, last) (row nos. of first and last times at 
+    # "significant" change points)
+    # (east, north) (their coordinates)
+    # cp lists indices of waypoints identified as change points
+    cp <- which(sig==1)
+    
+    
+    # bsig is sig in reverse time-order
+    bsig <- rep(0,nz)
+    for (j in 1:nz){
+      bsig[j] <- sig[nz-j+1]
+    }
+    
+    # "times" (row nos.) and coordinates of change points 
+    newpp <- newp[newp > tol]
+    cp.time <- newpp[sig==1]
+    cp.bx1 <- bz1[sig==1]
+    cp.bx2 <- bz2[sig==1]
+    cp.no <- n + 1 - cp.time
+    # last is cp.no in reverse order
+    last <- 0*cp.no
+    cp.leng <- length(cp.no)
+    for (j in 1:cp.leng){
+      last[j] <- cp.no[cp.leng-j+1]
+    }
+    # last contains row nos. of (last times at) change points 
+    # (east, north) are their coordinates
+    east <- x2[last]
+    north <- x1[last]
+    
+    # first contains row nos. of first times at change points 
+    first <- 0*last
+    for (j in 1:length(last)){
+      first[j] <- n+2 - min(which(newp > (n+1-last[j])))
+    }
+    
+    # PLOT WAYPOINTS AND MARK CHANGE POINTS
+    # For plotting purposes, reverse the order of
+    # bz1, bz2 to get z1, z2
+    z1 <- 0*bz1
+    z2 <- 0*bz2
+    nz <- length(z1)
+    for (j in 1:nz){
+      z1[j] <- bz1[nz-j+1]
+      z2[j] <- bz2[nz-j+1]
+    }
+    # s is vector to index the points
+    s <- c(1:nz)
+    
+    # Save change-points
+    z1bsig <- z1[bsig==1]# Latitude of CPs
+    z2bsig <- z2[bsig==1]# Longitude of CPs
+    cpsame <- which(first == last)
+    cpdiff <- which(first != last)
+    lastsame <- last[cpsame]# Number of lines where CPs are located 
+    firstdiff <- first[cpdiff]
+    lastdiff <- last[cpdiff]
+    z1bsame <- z1bsig[cpsame]
+    z2bsame <- z2bsig[cpsame]
+    z1bdiff <- z1bsig[cpdiff]
+    z2bdiff <- z2bsig[cpdiff]
+    
+    
+    # create a new column
+    datainp_sma$cp <- "NO-CP"; head(datainp_sma)
+    # Fill CPs in the change point locations
+    true.index <- which((datainp_sma$longitude %in% z2bsig) & 
+                          (datainp_sma$latitude %in% z1bsig))
+    datainp_sma$cp[true.index] <- "CP"
+    
+    # fill q value
+    datainp_sma$q <- q
+    
+    # plot
+    plot(datainp_sma$longitude, datainp_sma$latitude, pch = 19, 
+         main = datainp_sma$date[1])
+    # lines
+    lines(datainp_sma$longitude, datainp_sma$latitude)
+    points(datainp_sma[datainp_sma$cp == "CP",]$longitude, 
+           datainp_sma[datainp_sma$cp == "CP",]$latitude, pch = 19, col = 2)
+    
+    output_sma <- rbind(output_sma, datainp_sma)
+  }
+}
+```
+
+## Filtering duplicated lines so I don't count more than once the same "CP"
+```{r}
+output_sma_filter<- output_sma[,-c(1,3,4,5)]
+head(output_sma_filter)
+output_sma_filter<- output_sma_filter[!duplicated
+                                            (output_sma_filter), ]
+head(output_sma_filter)
+```
+
+## Summary to understand the number of "CPs" according to value of "q"
+```{r}
+count_cps_sma <- output_sma_filter %>% 
+  dplyr::group_by(date, q) %>% 
+  dplyr::summarize(number.of.CPs = sum(cp == "CP"))
+head(count_cps_sma)
+```
+
+## Now I organize the data into wide format to plot and understand what is the best value of "q" to use:
+```{r}
+count_cps_sma_wide <- spread(count_cps_sma, key = date, 
+                                value = number.of.CPs)
+# Create "total"TOTAL" column with sum or row values:
+count_cps_sma_wide <- count_cps_sma_wide %>%
+  mutate(TOTAL=rowSums(.[setdiff(names(.),"q")]))
+# Converting to data.frame:
+count_cps_sma_wide<-as.data.frame(count_cps_sma_wide)
+```
+
+## Ploting "q" for Santa Maria:
+
+### Plot of number of CPs per day according to values of "q" from 1 to 10. Light-gray lines represent number of CPs for each value of "q" in a unique day. Thick black line represent the sum of CPs for each value of "q" in all days.
+
+```{r}
+#tiff(".tiff", width = 11000, height = 6500, res = 1000)
+par(mfrow=c(1,1))
+plot(count_cps_sma_wide[,"q"],count_cps_sma_wide[,"06/05/15"],
+     type="o",pch=20,
+     col="gray85",xlab="q",ylab ="Number of change- points - sma",
+     xlim=c(1,max(count_cps_sma_wide[,"q"])),
+     ylim=c(1,max(count_cps_sma_wide)),lab=c(10,20,0))
+points(count_cps_sma_wide[,"q"],count_cps_sma_wide[,"09/04/15"],
+       type="o",pch=20,col="gray85")
+points(count_cps_sma_wide[,"q"],count_cps_sma_wide[,"11/04/15"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_sma_wide[,"q"],count_cps_sma_wide[,"12/04/15"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_sma_wide[,"q"],count_cps_sma_wide[,"15/03/15"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_sma_wide[,"q"],count_cps_sma_wide[,"15/04/15"],
+       type="o",pch=20,col="gray85")
+points(count_cps_sma_wide[,"q"],count_cps_sma_wide[,"18/03/15"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_sma_wide[,"q"],count_cps_sma_wide[,"20/03/15"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_sma_wide[,"q"],count_cps_sma_wide[,"21/03/15"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_sma_wide[,"q"],count_cps_sma_wide[,"29/03/15"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_sma_wide[,"q"],count_cps_sma_wide[,"31/03/15"],
+       type="o",pch=20,col="gray85") 
+points(count_cps_sma_wide[,"q"],count_cps_sma_wide[,"TOTAL"],
+       type="o",pch=20,col="black", lwd=3)
+#dev.off()
+```
+
+## It looks like q = 5 is the best for running the analysis, since it is the last value at which the number of CPs increases continuously. 
+
+## After finding q, I just have to create a subset of my "output_suzano" file with q = 5.
+```{r}
+cpt_sma <- subset(output_sma, q == 5)
+cpt_sma <- subset(cpt_sma, select = -id)
+cpt_sma$id <- 1:nrow(cpt_sma)
+cpt_sma<-cpt_sma[,c(9,1,2,3,4,5,6,7,8)]
+head(cpt_sma)
+```
+
+***
+
+# Here I present the plot with all identified CPs and associated behaviors in Santa Maia. Also, I plot here 3 different zones (territory and fragment border and core area). For this, I have worked in the dataframes in excel previously to organize the data acoordingly.
+
+### Identification of behaviors associated with direction change (CPs) along black lion tamarins' daily routes in Santa Maria. Pink triangles = frugivory (53%), blue diamonds = foraging (18%), green squares = resting (10%), brown upside-down triangules = long call (8%), red circles = locomotion (5%), beige stars = inactive (5%), purple cross = out of sight (3%). Little black dots and lines repesent GPS points recorded every 5 minutes.
+
+```{r}
+#tiff("sma_k95_k70.tiff", width = 11000, height = 6500, res = 1000)
+ggplot()+
+  geom_polygon(data = forest_sma, aes(x=X, y= Y),
+               fill = "darkgreen", colour = "black", size = 1)+
+  geom_polygon(data = k95_sma, aes(x=X, y= Y),
+               fill = "palegreen4", colour = "black", size = 1)+
+  geom_polygon(data = k70_sma, aes(x=X, y= Y),
+               fill = "yellowgreen", colour = "black", size = .5)+
+  #geom_polygon(data = terbordf_taquara, aes(x=long, y= lat, group=group),
+  #fill = "mediumseagreen", colour = "black") +
+  #geom_polygon(data = river_taquara, aes(x=long, y= lat, group=group),
+  #fill = "cadetblue1", colour = "black", size = 1) +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, size=2))+
+  geom_point(data = output.sma1, aes(x = longitude, 
+                                     y = latitude), size = 1) +
+  geom_path(data = output.sma1, aes(x = longitude, 
+                                    y = latitude), size = 0.2) +
+  geom_point(data = output.sma2, aes(x = longitude, 
+                                     y = latitude), size = 1) +
+  geom_path(data = output.sma2, aes(x = longitude, 
+                                    y = latitude), size = 0.2) +
+  geom_point(data = output.sma3, aes(x = longitude, 
+                                     y = latitude), size = 1) +
+  geom_path(data = output.sma3, aes(x = longitude, 
+                                    y = latitude), size = 0.2) +
+  geom_point(data = output.sma4, aes(x = longitude, 
+                                     y = latitude), size = 1) +
+  geom_path(data = output.sma4, aes(x = longitude, 
+                                    y = latitude), size = 0.2) +
+  geom_point(data = output.sma5, aes(x = longitude, 
+                                     y = latitude), size = 1) +
+  geom_path(data = output.sma5, aes(x = longitude, 
+                                    y = latitude), size = 0.2) +
+  geom_point(data = output.sma6, aes(x = longitude, 
+                                     y = latitude), size = 1) +
+  geom_path(data = output.sma6, aes(x = longitude, 
+                                    y = latitude), size = 0.2) +
+  geom_point(data = output.sma7, aes(x = longitude, 
+                                     y = latitude), size = 1) +
+  geom_path(data = output.sma7, aes(x = longitude, 
+                                    y = latitude), size = 0.2) +
+  geom_point(data = output.sma8, aes(x = longitude, 
+                                     y = latitude), size = 1) +
+  geom_path(data = output.sma8, aes(x = longitude, 
+                                    y = latitude), size = 0.2) +
+  geom_point(data = output.sma9, aes(x = longitude, 
+                                     y = latitude), size = 1) +
+  geom_path(data = output.sma9, aes(x = longitude, 
+                                    y = latitude), size = 0.2) +
+  geom_point(data = output.sma10, aes(x = longitude, 
+                                      y = latitude), size = 1) +
+  geom_path(data = output.sma10, aes(x = longitude, 
+                                     y = latitude), size = 0.2) +
+  geom_point(data = output.sma11, aes(x = longitude, 
+                                      y = latitude), size = 1) +
+  geom_path(data = output.sma11, aes(x = longitude, 
+                                     y = latitude), size = 0.2) +
+  geom_point(data = output.sma[output.sma$cpout == "x",], 
+             aes(x = longitude, y = latitude), col = "darkorchid2", 
+             shape = 3, size = 3.5, stroke = 1.5 )+
+  geom_point(data = output.sma[output.sma$cpinac == "x",], 
+             aes(x = longitude, y = latitude), col = "cornsilk", 
+             shape = 8, size = 4, stroke = 1)+
+  geom_point(data = output.sma[output.sma$cpres == "x",], 
+             aes(x = longitude, y = latitude), fill = "chartreuse2", 
+             shape = 22, size = 4, stroke = 1)+
+  geom_point(data = output.sma[output.sma$cpagonin == "x",], 
+             aes(x = longitude, y = latitude), fill = "coral", 
+             shape = 25, size = 4, stroke = 1)+
+  #geom_point(data = output.sma[output.sma$cpgum == "x",], 
+  #aes(x = longitude, y = latitude), fill = "purple", 
+  #shape = 22, size = 4, stroke = 1) +
+  geom_point(data = output.sma[output.sma$cplocom == "x",], 
+             aes(x = longitude, y = latitude), fill = "red", 
+             shape = 21, size = 4, stroke = 1)+
+  geom_point(data = output.sma[output.sma$cpfor == "x",], 
+             aes(x = longitude, y = latitude), fill = "cyan", 
+             shape = 23, size = 4, stroke = 1)+
+  geom_point(data = output.sma[output.sma$cplong == "x",], 
+             aes(x = longitude, y = latitude), fill = "chocolate4", 
+             shape = 25, size = 4, stroke = 1)+
+  geom_point(data = output.sma[output.sma$cpffru == "x",], 
+             aes(x = longitude, y = latitude), fill = "pink", 
+             shape = 24, size = 4, stroke = 1)+
+  #geom_point(data = output.sma[output.sma$cprubb == "x",], 
+  #aes(x = longitude, y = latitude), fill = "aliceblue", 
+  #shape = 21, size = 4, stroke = 1) +
+  coord_fixed()+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=2),
+        plot.margin=unit(c(0.1,0,0,0),"cm"))+
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5, 
+                                   size = 8, colour ="Black"))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_continuous(expand = c(0, 0)) +
+  annotation_scale(location = "tr", width_hint = 0.2, 
+                   pad_x = unit(0.1, "in"), pad_y = unit(0.8, "in"))+
+  annotation_north_arrow(location = "tr", which_north = "true", 
+                         pad_x = unit(0.3, "in"), pad_y = unit(0.1, "in"),
+                         style = north_arrow_fancy_orienteering)
+#dev.off()
+```

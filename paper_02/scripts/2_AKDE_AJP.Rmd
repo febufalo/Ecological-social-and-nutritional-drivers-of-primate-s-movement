@@ -1,0 +1,477 @@
+---
+title: "AKDE_AJP"
+author: "Felipe Bufalo"
+date: "2023-05-13"
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Home range estimation with AKDE for all four areas used for the publication to AJP
+
+## This method is indicated for auto-correlated GPS data. Also, I will implement in the estimates hard boundaries (i.e., forest borders) for the estimates to be forced inside forest areas.
+
+### First, load the packages and data
+```{r}
+setwd("~/Library/CloudStorage/GoogleDrive-felipe.bufalo@unesp.br/My Drive/Unesp/Mestrado/Analises/Analises_Publication/HR_Guarei-Taquara-Suzano")
+
+library(ctmm)
+library(dplyr)
+library(viridisLite)
+library(sf)
+library(rgdal)
+
+load("AKDE.rda")
+```
+
+
+# Starting with Guareí
+### Convert to telemetry object (ctmm format)
+```{r}
+df_guarei <- as.telemetry(df_guarei)
+summary(df_guarei)
+guarei_sp <- as(guarei_sf, "Spatial")
+```
+
+
+### Convert the shapefiles to spatial objects fo ctmm to read as boundary
+```{r}
+guarei_sp <- as(guarei_sf, "Spatial")
+```
+
+### Plot data for visual inspection
+```{r}
+plot(df_guarei, col = viridisLite::viridis(6))
+```
+
+### Generate a variogram using ctmm's variogram() function
+```{r}
+vg <- variogram(df_guarei)
+plot(vg)
+```
+
+### Guesstimate the model's parameters
+### This is done to provide initial values for the formal model fitting/selection
+```{r}
+GUESS_guarei <- ctmm.guess(df_guarei,interactive=FALSE); summary(GUESS_guarei)
+```
+
+### Fit and select models
+```{r}
+FIT_ML <- ctmm.select(df_guarei, GUESS_guarei, method = 'ML'); summary(FIT_ML)
+```
+
+### Estimate an animal's home range conditioned on the selected autocorrelation model
+### I will use both 
+```{r}
+UDakdedf_ML <- akde(df_guarei,FIT_ML, SP=guarei_sp, SP.in=TRUE);
+summary(UDakdedf_ML)
+```
+
+### Look at the estimated home range
+```{r}
+plot(UDakdedf_ML)
+title(expression("Guareí ML - OUF AKDE" ["C"]))
+```
+
+### Some parameters for the estimations
+```{r}
+summary(UDakdedf_ML)$DOF["area"] # effective sample size of guareí GC01, ML
+nrow(df_guarei) # absolute sample size
+```
+
+### For exporting the shapfiles:
+```{r}
+#shapefile_polygons <- as.sf(UDakdedf_ML, level.UD=0.95, level=0.95)
+#plot(shapefile_polygons)
+
+#middle_polygon <- shapefile_polygons[2,]  #selects the second row which is the
+#95% est middle polygon
+#plot(middle_polygon)
+
+#class(middle_polygon)
+
+# Specify the path to the output geopackage file
+#output_path <- "~/Library/CloudStorage/GoogleDrive-felipe.bufalo@unesp.br/My Drive/Unesp/Mestrado/Analises/Analises_Publication/Guarei/hr_guarei/ctmm/
+#guarei_akde95.gpkg"
+
+# Write the "sf" object to a geopackage
+#st_write(middle_polygon, output_path, layer = "guarei_akde95", driver = "GPKG")
+
+## Exporting shapfile for akde 70%
+#shapefile_polygons_70 <- as.sf(UDakdedf_ML, level.UD=0.70, level=0.95)
+#plot(shapefile_polygons_70)
+
+#middle_polygon_70 <- shapefile_polygons_70[2,]  #selects the second row which 
+#is the 95% est middle polygon
+#plot(middle_polygon_70)
+
+#class(middle_polygon_70)
+
+# Specify the path to the output geopackage file
+#output_path <- "~/Library/CloudStorage/GoogleDrive-felipe.bufalo@unesp.br/My Drive/Unesp/Mestrado/Analises/Analises_Publication/Guarei/hr_guarei/ctmm/
+#guarei_akde70.gpkg"
+
+# Write the "sf" object to a geopackage
+#st_write(middle_polygon_70, output_path, layer = "guarei_akde70", 
+#driver = "GPKG")
+
+## Exporting shapfile for akde 50%
+#shapefile_polygons_50 <- as.sf(UDakdedf_ML, level.UD=0.50, level=0.95)
+#plot(shapefile_polygons_50)
+
+#middle_polygon_50 <- shapefile_polygons_50[2,]  #selects the second row which 
+#is the 95% est middle polygon
+#plot(middle_polygon_50)
+
+#class(middle_polygon_50)
+
+# Specify the path to the output geopackage file
+#output_path <- "~/Library/CloudStorage/GoogleDrive-felipe.bufalo@unesp.br/My Drive/Unesp/Mestrado/Analises/Analises_Publication/Guarei/hr_guarei/ctmm/
+#guarei_akde50.gpkg"
+
+# Write the "sf" object to a geopackage
+#st_write(middle_polygon_50, output_path, layer = "guarei_akde50", 
+#driver = "GPKG")
+```
+
+
+# Suzano
+### Convert to telemetry object (ctmm format)
+```{r}
+df_suzano <- as.telemetry(df_suzano)
+summary(df_suzano)
+```
+
+### Convert the shapefiles to spatial objects fo ctmm to read as boundary
+```{r}
+suzano_sp <- as(suzano_sf, "Spatial")
+```
+
+### Plot data for visual inspection
+```{r}
+plot(df_suzano, col = viridisLite::viridis(6))
+```
+
+### Generate a variogram using ctmm's variogram() function
+```{r}
+vg <- variogram(df_suzano)
+plot(vg)
+```
+
+### Guesstimate the model's parameters
+### This is done to provide initial values for the formal model fitting/selection
+```{r}
+GUESS_suzano <- ctmm.guess(df_suzano,interactive=FALSE); summary(GUESS_suzano)
+```
+
+### Fit and select models
+```{r}
+FIT_ML_suzano <- ctmm.select(df_suzano, GUESS_suzano, method = 'ML')
+summary(FIT_ML_suzano)
+```
+
+
+### Estimate an animal's home range conditioned on the selected autocorrelation model
+### I will use both 
+```{r}
+UDakdedf_suzano_ML <- akde(df_suzano,FIT_ML_suzano, SP=suzano_sp, SP.in=TRUE);summary(UDakdedf_suzano_ML)
+```
+
+### Look at the estimated home range
+```{r}
+plot(UDakdedf_suzano_ML)
+title(expression("Guareí ML - OUF AKDE" ["C"]))
+```
+
+### Some parameters for the estimations
+```{r}
+summary(UDakdedf_suzano_ML)$DOF["area"] # effective sample size of suzano group,
+#ML
+nrow(df_suzano) # absolute sample size
+```
+
+### For exporting the shapfiles:
+```{r}
+#shapefile_polygons <- as.sf(UDakdedf_suzano_ML, level.UD=0.95, level=0.95)
+#plot(shapefile_polygons)
+
+#middle_polygon <- shapefile_polygons[2,]  #selects the second row which is the
+#95% est middle polygon
+#plot(middle_polygon)
+
+#class(middle_polygon)
+
+# Specify the path to the output geopackage file
+#output_path <- "~/Library/CloudStorage/GoogleDrive-felipe.bufalo@unesp.br/My Drive/Unesp/Mestrado/Analises/Analises_Publication/suzano/hr_suzano/ctmm/
+#suzano_akde95.gpkg"
+
+# Write the "sf" object to a geopackage
+#st_write(middle_polygon, output_path, layer = "suzano_akde95", driver = "GPKG")
+
+## Exporting shapfile for akde 70%
+#shapefile_polygons_70 <- as.sf(UDakdedf_suzano_ML, level.UD=0.70, level=0.95)
+#plot(shapefile_polygons_70)
+
+#middle_polygon_70 <- shapefile_polygons_70[2,]  #selects the second row which 
+#is the 95% est middle polygon
+#plot(middle_polygon_70)
+
+#class(middle_polygon_70)
+
+# Specify the path to the output geopackage file
+#output_path <- "~/Library/CloudStorage/GoogleDrive-felipe.bufalo@unesp.br/My Drive/Unesp/Mestrado/Analises/Analises_Publication/suzano/hr_suzano/ctmm/
+#suzano_akde70.gpkg"
+
+# Write the "sf" object to a geopackage
+#st_write(middle_polygon_70, output_path, layer = "suzano_akde70", 
+#driver = "GPKG")
+
+## Exporting shapfile for akde 50%
+#shapefile_polygons_50 <- as.sf(UDakdedf_suzano_ML, level.UD=0.50, level=0.95)
+#plot(shapefile_polygons_50)
+
+#middle_polygon_50 <- shapefile_polygons_50[2,]  #selects the second row which 
+#is the 95% est middle polygon
+#plot(middle_polygon_50)
+
+#class(middle_polygon_50)
+
+# Specify the path to the output geopackage file
+#output_path <- "~/Library/CloudStorage/GoogleDrive-felipe.bufalo@unesp.br/My Drive/Unesp/Mestrado/Analises/Analises_Publication/suzano/hr_suzano/ctmm/
+#suzano_akde50.gpkg"
+
+# Write the "sf" object to a geopackage
+#st_write(middle_polygon_50, output_path, layer = "suzano_akde50", 
+#driver = "GPKG")
+```
+
+
+# Taquara
+### Convert to telemetry object (ctmm format)
+```{r}
+df_taquara <- as.telemetry(df_taquara)
+summary(df_taquara)
+```
+
+### Convert the shapefiles to spatial objects fo ctmm to read as boundary
+```{r}
+taquara_sp <- as(taquara_sf, "Spatial")
+```
+
+### Plot data for visual inspection
+```{r}
+plot(df_taquara, col = viridisLite::viridis(6))
+```
+
+### Generate a variogram using ctmm's variogram() function
+```{r}
+vg <- variogram(df_taquara)
+plot(vg)
+```
+
+### Guesstimate the model's parameters
+### This is done to provide initial values for the formal model fitting/selection
+```{r}
+GUESS_taquara <- ctmm.guess(df_taquara,interactive=FALSE); 
+summary(GUESS_taquara)
+```
+
+### Fit and select models
+```{r}
+FIT_ML_taquara <- ctmm.select(df_taquara, GUESS_taquara, method = 'ML')
+summary(FIT_ML_taquara)
+```
+
+
+### Estimate an animal's home range conditioned on the selected autocorrelation model
+### I will use both 
+```{r}
+UDakdedf_taquara_ML <- akde(df_taquara,FIT_ML_taquara, SP=taquara_sp, SP.in=TRUE);summary(UDakdedf_taquara_ML)
+```
+
+### Look at the estimated home range
+```{r}
+plot(UDakdedf_taquara_ML)
+title(expression("Guareí ML - OUF AKDE" ["C"]))
+```
+
+### Some parameters for the estimations
+```{r}
+summary(UDakdedf_taquara_ML)$DOF["area"] # effective sample size of taquara 
+#group, ML
+nrow(df_taquara) # absolute sample size
+```
+
+### For exporting the shapfiles:
+```{r}
+#shapefile_polygons <- as.sf(UDakdedf_taquara_ML, level.UD=0.95, level=0.95)
+#plot(shapefile_polygons)
+
+#middle_polygon <- shapefile_polygons[2,]  #selects the second row which is the
+#95% est middle polygon
+#plot(middle_polygon)
+
+#class(middle_polygon)
+
+# Specify the path to the output geopackage file
+#output_path <- "~/Library/CloudStorage/GoogleDrive-felipe.bufalo@unesp.br/My Drive/Unesp/Mestrado/Analises/Analises_Publication/taquara/hr_taquara/ctmm/
+#taquara_akde95.gpkg"
+
+# Write the "sf" object to a geopackage
+#st_write(middle_polygon, output_path, layer = "taquara_akde95", driver = "GPKG")
+
+## Exporting shapfile for akde 70%
+#shapefile_polygons_70 <- as.sf(UDakdedf_taquara_ML, level.UD=0.70, level=0.95)
+#plot(shapefile_polygons_70)
+
+#middle_polygon_70 <- shapefile_polygons_70[2,]  #selects the second row which 
+#is the 95% est middle polygon
+#plot(middle_polygon_70)
+
+#class(middle_polygon_70)
+
+# Specify the path to the output geopackage file
+#output_path <- "~/Library/CloudStorage/GoogleDrive-felipe.bufalo@unesp.br/My Drive/Unesp/Mestrado/Analises/Analises_Publication/taquara/hr_taquara/ctmm/
+#taquara_akde70.gpkg"
+
+# Write the "sf" object to a geopackage
+#st_write(middle_polygon_70, output_path, layer = "taquara_akde70", 
+#driver = "GPKG")
+
+## Exporting shapfile for akde 50%
+#shapefile_polygons_50 <- as.sf(UDakdedf_taquara_ML, level.UD=0.50, level=0.95)
+#plot(shapefile_polygons_50)
+
+#middle_polygon_50 <- shapefile_polygons_50[2,]  #selects the second row which 
+#is the 95% est middle polygon
+#plot(middle_polygon_50)
+
+#class(middle_polygon_50)
+
+# Specify the path to the output geopackage file
+#output_path <- "~/Library/CloudStorage/GoogleDrive-felipe.bufalo@unesp.br/My Drive/Unesp/Mestrado/Analises/Analises_Publication/taquara/hr_taquara/ctmm/
+#taquara_akde50.gpkg"
+
+# Write the "sf" object to a geopackage
+#st_write(middle_polygon_50, output_path, layer = "taquara_akde50", 
+#driver = "GPKG")
+```
+
+
+# Santa Maria (sma)
+### Convert to telemetry object (ctmm format)
+```{r}
+df_sma <- as.telemetry(df_sma)
+summary(df_sma)
+```
+
+### Convert the shapefiles to spatial objects fo ctmm to read as boundary
+```{r}
+sma_sp <- as(sma_sf, "Spatial")
+```
+
+### Plot data for visual inspection
+```{r}
+plot(df_sma, col = viridisLite::viridis(6))
+```
+
+### Generate a variogram using ctmm's variogram() function
+```{r}
+vg <- variogram(df_sma)
+plot(vg)
+```
+
+### Guesstimate the model's parameters
+### This is done to provide initial values for the formal model fitting/selection
+```{r}
+GUESS_sma <- ctmm.guess(df_sma,interactive=FALSE); 
+summary(GUESS_sma)
+```
+
+### Fit and select models
+```{r}
+FIT_ML_sma <- ctmm.select(df_sma, GUESS_sma, method = 'ML')
+summary(FIT_ML_sma)
+```
+
+
+### Estimate an animal's home range conditioned on the selected autocorrelation model
+### I will use both 
+```{r}
+UDakdedf_sma_ML <- akde(df_sma,FIT_ML_sma, SP=sma_sp, SP.in=TRUE);
+summary(UDakdedf_sma_ML)
+```
+
+### Look at the estimated home range
+```{r}
+plot(UDakdedf_sma_ML)
+title(expression("Guareí ML - OUF AKDE" ["C"]))
+```
+
+### Some parameters for the estimations
+```{r}
+summary(UDakdedf_sma_ML)$DOF["area"] # effective sample size of sma 
+#group, ML
+nrow(df_sma) # absolute sample size
+```
+
+### For exporting the shapfiles:
+```{r}
+#shapefile_polygons <- as.sf(UDakdedf_sma_ML, level.UD=0.95, level=0.95)
+#plot(shapefile_polygons)
+
+#middle_polygon <- shapefile_polygons[2,]  #selects the second row which is the
+#95% est middle polygon
+#plot(middle_polygon)
+
+#class(middle_polygon)
+
+# Specify the path to the output geopackage file
+#output_path <- "~/Library/CloudStorage/GoogleDrive-felipe.bufalo@unesp.br/My Drive/Unesp/Mestrado/Analises/Analises_Publication/sma/hr_sma/ctmm/
+#sma_akde95.gpkg"
+
+# Write the "sf" object to a geopackage
+#st_write(middle_polygon, output_path, layer = "sma_akde95", driver = "GPKG")
+
+## Exporting shapfile for akde 70%
+#shapefile_polygons_70 <- as.sf(UDakdedf_sma_ML, level.UD=0.70, level=0.95)
+#plot(shapefile_polygons_70)
+
+#middle_polygon_70 <- shapefile_polygons_70[2,]  #selects the second row which 
+#is the 95% est middle polygon
+#plot(middle_polygon_70)
+
+#class(middle_polygon_70)
+
+# Specify the path to the output geopackage file
+#output_path <- "~/Library/CloudStorage/GoogleDrive-felipe.bufalo@unesp.br/My Drive/Unesp/Mestrado/Analises/Analises_Publication/sma/hr_sma/ctmm/
+#sma_akde70.gpkg"
+
+# Write the "sf" object to a geopackage
+#st_write(middle_polygon_70, output_path, layer = "sma_akde70", 
+#driver = "GPKG")
+
+## Exporting shapfile for akde 50%
+#shapefile_polygons_50 <- as.sf(UDakdedf_sma_ML, level.UD=0.50, level=0.95)
+#plot(shapefile_polygons_50)
+
+#middle_polygon_50 <- shapefile_polygons_50[2,]  #selects the second row which 
+#is the 95% est middle polygon
+#plot(middle_polygon_50)
+
+#class(middle_polygon_50)
+
+# Specify the path to the output geopackage file
+#output_path <- "~/Library/CloudStorage/GoogleDrive-felipe.bufalo@unesp.br/My Drive/Unesp/Mestrado/Analises/Analises_Publication/sma/hr_sma/ctmm/
+#sma_akde50.gpkg"
+
+# Write the "sf" object to a geopackage
+#st_write(middle_polygon_50, output_path, layer = "sma_akde50", 
+#driver = "GPKG")
+```
+

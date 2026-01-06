@@ -1,0 +1,750 @@
+---
+title: "Core areas"
+author: "Felipe Bufalo"
+date: "2023-05-14"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Script to estimate the core areas from AKDEc home range estimations.
+## After estimating the home ranges, I wanted to follow Samuel & Garton 1985 method to get to the core area without choosing in an arbitrary way. The AKDEs were estimated using the shape files of the areas as hard boundaries.
+
+### I had a lot of dificulties to get to the results (core areas). I could not estimate the isopleths without someonelse's assistance with ctmm package (dealing with UD - AKDE objects). So, I performed the most mechanical way possible, extracting manually each home range area estimated by the model for each area and then created the data frames to work with. 
+
+## It is ugly, but it works!
+
+### Load packages
+```{r}
+library(ctmm)
+library(sf)
+```
+
+# Starting with Guareí
+```{r}
+load("AKDE_guarei.rda")
+```
+
+## Take a look at the model
+```{r}
+summary(UDakdedf_ML)
+```
+
+## I will plot the akde home range estimation so I can see how it looks:
+```{r}
+plot(UDakdedf_ML) # Looks good!
+```
+
+## I will now plot all isopleths (5% by 5% - from 1% home range estimation to 99%). It was the only way I coul manage this. Basically, I create a shapefile for each isopleth estimation and then extract the area. This allowed me to get the areas estimated in each isopleth.
+
+```{r}
+shapefile_polygons99 <- as.sf(UDakdedf_ML, level.UD=0.99, level=0.95)
+middle_polygon99 <- shapefile_polygons99[2,]
+area_m2_99 <-st_area(middle_polygon99)
+area_m2_99/10000
+
+shapefile_polygons95 <- as.sf(UDakdedf_ML, level.UD=0.95, level=0.95)
+middle_polygon95 <- shapefile_polygons95[2,]
+area_m2_95 <-st_area(middle_polygon95)
+area_m2_95/10000
+
+shapefile_polygons90 <- as.sf(UDakdedf_ML, level.UD=0.90, level=0.95)
+middle_polygon90 <- shapefile_polygons90[2,]
+area_m2_90 <-st_area(middle_polygon90)
+area_m2_90/10000
+
+shapefile_polygons85 <- as.sf(UDakdedf_ML, level.UD=0.85, level=0.95)
+middle_polygon85 <- shapefile_polygons85[2,]
+area_m2_85 <-st_area(middle_polygon85)
+area_m2_85/10000
+
+shapefile_polygons80 <- as.sf(UDakdedf_ML, level.UD=0.80, level=0.95)
+middle_polygon80 <- shapefile_polygons80[2,]
+area_m2_80 <-st_area(middle_polygon80)
+area_m2_80/10000
+
+shapefile_polygons75 <- as.sf(UDakdedf_ML, level.UD=0.75, level=0.95)
+middle_polygon75 <- shapefile_polygons75[2,]
+area_m2_75 <-st_area(middle_polygon75)
+area_m2_75/10000
+
+shapefile_polygons70 <- as.sf(UDakdedf_ML, level.UD=0.70, level=0.95)
+middle_polygon70 <- shapefile_polygons70[2,]
+area_m2_70 <-st_area(middle_polygon70)
+area_m2_70/10000
+
+shapefile_polygons65 <- as.sf(UDakdedf_ML, level.UD=0.65, level=0.95)
+middle_polygon65 <- shapefile_polygons65[2,]
+area_m2_65 <-st_area(middle_polygon65)
+area_m2_65/10000
+
+shapefile_polygons60 <- as.sf(UDakdedf_ML, level.UD=0.60, level=0.95)
+middle_polygon60 <- shapefile_polygons60[2,]
+area_m2_60 <-st_area(middle_polygon60)
+area_m2_60/10000
+
+shapefile_polygons55 <- as.sf(UDakdedf_ML, level.UD=0.55, level=0.95)
+middle_polygon55 <- shapefile_polygons55[2,]
+area_m2_55 <-st_area(middle_polygon55)
+area_m2_55/10000
+
+shapefile_polygons50 <- as.sf(UDakdedf_ML, level.UD=0.50, level=0.95)
+middle_polygon50 <- shapefile_polygons50[2,]
+area_m2_50 <-st_area(middle_polygon50)
+area_m2_50/10000
+
+shapefile_polygons45 <- as.sf(UDakdedf_ML, level.UD=0.45, level=0.95)
+middle_polygon45 <- shapefile_polygons45[2,]
+area_m2_45 <-st_area(middle_polygon45)
+area_m2_45/10000
+
+shapefile_polygons40 <- as.sf(UDakdedf_ML, level.UD=0.40, level=0.95)
+middle_polygon40 <- shapefile_polygons40[2,]
+area_m2_40 <-st_area(middle_polygon40)
+area_m2_40/10000
+
+shapefile_polygons35 <- as.sf(UDakdedf_ML, level.UD=0.35, level=0.95)
+middle_polygon35 <- shapefile_polygons35[2,]
+area_m2_35 <-st_area(middle_polygon35)
+area_m2_35/10000
+
+shapefile_polygons30 <- as.sf(UDakdedf_ML, level.UD=0.30, level=0.95)
+middle_polygon30 <- shapefile_polygons30[2,]
+area_m2_30 <-st_area(middle_polygon30)
+area_m2_30/10000
+
+shapefile_polygons25 <- as.sf(UDakdedf_ML, level.UD=0.25, level=0.95)
+middle_polygon25 <- shapefile_polygons25[2,]
+area_m2_25 <-st_area(middle_polygon25)
+area_m2_25/10000
+
+shapefile_polygons20 <- as.sf(UDakdedf_ML, level.UD=0.20, level=0.95)
+middle_polygon20 <- shapefile_polygons20[2,]
+area_m2_20 <-st_area(middle_polygon20)
+area_m2_20/10000
+
+shapefile_polygons15 <- as.sf(UDakdedf_ML, level.UD=0.15, level=0.95)
+middle_polygon15 <- shapefile_polygons15[2,]
+area_m2_15 <-st_area(middle_polygon15)
+area_m2_15/10000
+
+shapefile_polygons10 <- as.sf(UDakdedf_ML, level.UD=0.10, level=0.95)
+middle_polygon10 <- shapefile_polygons10[2,]
+area_m2_10 <-st_area(middle_polygon10)
+area_m2_10/10000
+
+shapefile_polygons05 <- as.sf(UDakdedf_ML, level.UD=0.05, level=0.95)
+middle_polygon05 <- shapefile_polygons05[2,]
+area_m2_05 <-st_area(middle_polygon05)
+area_m2_05/10000
+
+shapefile_polygons01 <- as.sf(UDakdedf_ML, level.UD=0.01, level=0.95)
+middle_polygon01 <- shapefile_polygons01[2,]
+area_m2_01 <-st_area(middle_polygon01)
+area_m2_01/10000
+```
+
+## With all areas printed, I manually created the vectors with area and isopleths.
+
+```{r}
+area.href <- c(45.87342, 37.96572, 33.5622, 30.26605, 27.43143, 
+               24.88615, 22.54775, 20.33878, 18.25306, 16.23031, 14.39388, 
+               12.60215, 10.89223, 9.264786, 7.717092, 6.246799, 4.853915, 
+               3.541742, 2.290297, 1.101816, 0.197499)
+
+isopleth <- c(99, 95, 90, 85, 80, 75, 70, 65, 60, 55, 50, 45, 40, 35, 30, 25, 20,
+              15, 10, 05, 01)
+```
+
+## Then, create the data frame 
+```{r}
+HRsize <- data.frame(area.href = area.href, isopleth = isopleth)
+HRsize <- HRsize[order(HRsize$isopleth), ]
+head(HRsize)
+```
+
+## Calculate the percentage of total home range area represented by each isopleth
+```{r}
+HRsize$PA <- HRsize$area.href/(max(HRsize$area.href))*100 # add PA
+HRsize$IV <- HRsize$isopleth # add IV
+```
+
+## Identify the core area as the point of maximum deviation from area/%UD equality line
+```{r}
+with(HRsize, which((IV-PA) == max(IV-PA)))
+```
+
+## Change the value according to the result (IV row number indicated above (15))
+```{r}
+HRsize$IV[15] # 70% isopleth
+```
+
+## Look what is the size of the home range at 70%
+```{r}
+HRsize # ha 
+```
+
+## Plot to see the probability of uniform area use vs empirical area use in Guareí
+```{r}
+plot(seq(0,100,length = 50), seq(0,100,length = 50), type = "l",lty = 3, 
+     lwd=2, xlab="Isopleth (%UD)", ylab="Proportion of total home range area (%)", 
+     main="Core area - Guareí")
+lines(PA ~ IV, data = HRsize, col = 2, lwd=2)
+points(x = 70, y = 49.1521016, type = "p", lwd=2) ## change X according to value 
+# identified above and Y to meet the line
+```
+
+# Get area estimates and errors:
+```{r}
+shapefile_polygons70 <- as.sf(UDakdedf_ML, level.UD=0.70, level=0.95)
+area_m2_70 <-st_area(shapefile_polygons70)
+area_m2_70/10000 # ha already!
+```
+
+# Suzano
+```{r}
+rm(list=ls())
+load("AKDE_suzano.rda")
+```
+
+## Take a look at the model
+```{r}
+summary(UDakdedf_suzano_ML)
+```
+
+## I will plot the akde home range estimation so I can see how it looks:
+```{r}
+plot(UDakdedf_suzano_ML) # Looks good!
+```
+
+## I will now plot all isopleths (5% by 5% - from 1% home range estimation to 99%). It was the only way I coul manage this. Basically, I create a shapefile for each isopleth estimation and then extract the area. This allowed me to get the areas estimated in each isopleth.
+
+```{r}
+shapefile_polygons99 <- as.sf(UDakdedf_suzano_ML, level.UD=0.99, level=0.95)
+middle_polygon99 <- shapefile_polygons99[2,]
+area_m2_99 <-st_area(middle_polygon99)
+area_m2_99/10000
+
+shapefile_polygons95 <- as.sf(UDakdedf_suzano_ML, level.UD=0.95, level=0.95)
+middle_polygon95 <- shapefile_polygons95[2,]
+area_m2_95 <-st_area(middle_polygon95)
+area_m2_95/10000
+
+shapefile_polygons90 <- as.sf(UDakdedf_suzano_ML, level.UD=0.90, level=0.95)
+middle_polygon90 <- shapefile_polygons90[2,]
+area_m2_90 <-st_area(middle_polygon90)
+area_m2_90/10000
+
+shapefile_polygons85 <- as.sf(UDakdedf_suzano_ML, level.UD=0.85, level=0.95)
+middle_polygon85 <- shapefile_polygons85[2,]
+area_m2_85 <-st_area(middle_polygon85)
+area_m2_85/10000
+
+shapefile_polygons80 <- as.sf(UDakdedf_suzano_ML, level.UD=0.80, level=0.95)
+middle_polygon80 <- shapefile_polygons80[2,]
+area_m2_80 <-st_area(middle_polygon80)
+area_m2_80/10000
+
+shapefile_polygons75 <- as.sf(UDakdedf_suzano_ML, level.UD=0.75, level=0.95)
+middle_polygon75 <- shapefile_polygons75[2,]
+area_m2_75 <-st_area(middle_polygon75)
+area_m2_75/10000
+
+shapefile_polygons70 <- as.sf(UDakdedf_suzano_ML, level.UD=0.70, level=0.95)
+middle_polygon70 <- shapefile_polygons70[2,]
+area_m2_70 <-st_area(middle_polygon70)
+area_m2_70/10000
+
+shapefile_polygons65 <- as.sf(UDakdedf_suzano_ML, level.UD=0.65, level=0.95)
+middle_polygon65 <- shapefile_polygons65[2,]
+area_m2_65 <-st_area(middle_polygon65)
+area_m2_65/10000
+
+shapefile_polygons60 <- as.sf(UDakdedf_suzano_ML, level.UD=0.60, level=0.95)
+middle_polygon60 <- shapefile_polygons60[2,]
+area_m2_60 <-st_area(middle_polygon60)
+area_m2_60/10000
+
+shapefile_polygons55 <- as.sf(UDakdedf_suzano_ML, level.UD=0.55, level=0.95)
+middle_polygon55 <- shapefile_polygons55[2,]
+area_m2_55 <-st_area(middle_polygon55)
+area_m2_55/10000
+
+shapefile_polygons50 <- as.sf(UDakdedf_suzano_ML, level.UD=0.50, level=0.95)
+middle_polygon50 <- shapefile_polygons50[2,]
+area_m2_50 <-st_area(middle_polygon50)
+area_m2_50/10000
+
+shapefile_polygons45 <- as.sf(UDakdedf_suzano_ML, level.UD=0.45, level=0.95)
+middle_polygon45 <- shapefile_polygons45[2,]
+area_m2_45 <-st_area(middle_polygon45)
+area_m2_45/10000
+
+shapefile_polygons40 <- as.sf(UDakdedf_suzano_ML, level.UD=0.40, level=0.95)
+middle_polygon40 <- shapefile_polygons40[2,]
+area_m2_40 <-st_area(middle_polygon40)
+area_m2_40/10000
+
+shapefile_polygons35 <- as.sf(UDakdedf_suzano_ML, level.UD=0.35, level=0.95)
+middle_polygon35 <- shapefile_polygons35[2,]
+area_m2_35 <-st_area(middle_polygon35)
+area_m2_35/10000
+
+shapefile_polygons30 <- as.sf(UDakdedf_suzano_ML, level.UD=0.30, level=0.95)
+middle_polygon30 <- shapefile_polygons30[2,]
+area_m2_30 <-st_area(middle_polygon30)
+area_m2_30/10000
+
+shapefile_polygons25 <- as.sf(UDakdedf_suzano_ML, level.UD=0.25, level=0.95)
+middle_polygon25 <- shapefile_polygons25[2,]
+area_m2_25 <-st_area(middle_polygon25)
+area_m2_25/10000
+
+shapefile_polygons20 <- as.sf(UDakdedf_suzano_ML, level.UD=0.20, level=0.95)
+middle_polygon20 <- shapefile_polygons20[2,]
+area_m2_20 <-st_area(middle_polygon20)
+area_m2_20/10000
+
+shapefile_polygons15 <- as.sf(UDakdedf_suzano_ML, level.UD=0.15, level=0.95)
+middle_polygon15 <- shapefile_polygons15[2,]
+area_m2_15 <-st_area(middle_polygon15)
+area_m2_15/10000
+
+shapefile_polygons10 <- as.sf(UDakdedf_suzano_ML, level.UD=0.10, level=0.95)
+middle_polygon10 <- shapefile_polygons10[2,]
+area_m2_10 <-st_area(middle_polygon10)
+area_m2_10/10000
+
+shapefile_polygons05 <- as.sf(UDakdedf_suzano_ML, level.UD=0.05, level=0.95)
+middle_polygon05 <- shapefile_polygons05[2,]
+area_m2_05 <-st_area(middle_polygon05)
+area_m2_05/10000
+
+shapefile_polygons01 <- as.sf(UDakdedf_suzano_ML, level.UD=0.01, level=0.95)
+middle_polygon01 <- shapefile_polygons01[2,]
+area_m2_01 <-st_area(middle_polygon01)
+area_m2_01/10000
+```
+
+## With all areas printed, I manually created the vectors with area and isopleths.
+
+```{r}
+area.href <- c(0.06404234, 0.4003905, 0.8198001, 1.26308, 1.740751, 2.246062, 
+               2.780916, 3.342436, 3.948553, 4.613612, 5.352505, 6.179061, 
+               7.104065, 8.145396, 9.330773, 10.69629, 12.27685, 14.19957, 
+               16.50785, 19.41044, 23.79421)
+
+
+isopleth <- c(01, 05, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 
+              80, 85, 90, 95, 99)
+```
+
+## Then, create the data frame 
+```{r}
+HRsize <- data.frame(area.href = area.href, isopleth = isopleth)
+head(HRsize) 
+```
+
+## Calculate the percentage of total home range area represented by each isopleth
+```{r}
+HRsize$PA <- HRsize$area.href/(max(HRsize$area.href))*100 # add PA
+HRsize$IV <- HRsize$isopleth # add IV
+```
+
+## Identify the core area as the point of maximum deviation from area/%UD equality line
+```{r}
+with(HRsize, which((IV-PA) == max(IV-PA)))
+```
+
+## Change the value according to the result (IV row number indicated above (15))
+```{r}
+HRsize$IV[15] # 70% isopleth
+```
+
+## Look what is the size of the home range at 70%
+```{r}
+HRsize #11.16579000 ha 
+```
+
+## Plot to see the probability of uniform area use vs empirical area use in Suzano
+```{r}
+plot(seq(0,100,length = 50), seq(0,100,length = 50), type = "l",lty = 3, 
+     lwd=2, xlab="Isopleth (%UD)", ylab="Proportion of total home range area (%)", 
+     main="Core area - Suzano")
+lines(PA ~ IV, data = HRsize, col = 2, lwd=2)
+points(x = 70, y = 39.2144686, type = "p", lwd=2) ## change X according to value 
+# identified above and Y to meet the line
+```
+
+# Extract area in ha and errors:
+```{r}
+shapefile_polygons70 <- as.sf(UDakdedf_suzano_ML, level.UD=0.70, level=0.95)
+area_m2_70 <-st_area(shapefile_polygons70)
+area_m2_70/10000 # ha already!
+```
+
+# Taquara
+```{r}
+rm(list=ls())
+load("AKDE_taquara.rda")
+```
+
+## Take a look at the model
+```{r}
+summary(UDakdedf_taquara_ML)
+```
+
+## I will plot the akde home range estimation so I can see how it looks:
+```{r}
+plot(UDakdedf_taquara_ML) # Looks good!
+```
+
+## I will now plot all isopleths (5% by 5% - from 1% home range estimation to 99%). It was the only way I coul manage this. Basically, I create a shapefile for each isopleth estimation and then extract the area. This allowed me to get the areas estimated in each isopleth.
+
+```{r}
+shapefile_polygons99 <- as.sf(UDakdedf_taquara_ML, level.UD=0.99, level=0.95)
+middle_polygon99 <- shapefile_polygons99[2,]
+area_m2_99 <-st_area(middle_polygon99)
+area_m2_99/10000
+
+shapefile_polygons95 <- as.sf(UDakdedf_taquara_ML, level.UD=0.95, level=0.95)
+middle_polygon95 <- shapefile_polygons95[2,]
+area_m2_95 <-st_area(middle_polygon95)
+area_m2_95/10000
+
+shapefile_polygons90 <- as.sf(UDakdedf_taquara_ML, level.UD=0.90, level=0.95)
+middle_polygon90 <- shapefile_polygons90[2,]
+area_m2_90 <-st_area(middle_polygon90)
+area_m2_90/10000
+
+shapefile_polygons85 <- as.sf(UDakdedf_taquara_ML, level.UD=0.85, level=0.95)
+middle_polygon85 <- shapefile_polygons85[2,]
+area_m2_85 <-st_area(middle_polygon85)
+area_m2_85/10000
+
+shapefile_polygons80 <- as.sf(UDakdedf_taquara_ML, level.UD=0.80, level=0.95)
+middle_polygon80 <- shapefile_polygons80[2,]
+area_m2_80 <-st_area(middle_polygon80)
+area_m2_80/10000
+
+shapefile_polygons75 <- as.sf(UDakdedf_taquara_ML, level.UD=0.75, level=0.95)
+middle_polygon75 <- shapefile_polygons75[2,]
+area_m2_75 <-st_area(middle_polygon75)
+area_m2_75/10000
+
+shapefile_polygons70 <- as.sf(UDakdedf_taquara_ML, level.UD=0.70, level=0.95)
+middle_polygon70 <- shapefile_polygons70[2,]
+area_m2_70 <-st_area(middle_polygon70)
+area_m2_70/10000
+
+shapefile_polygons65 <- as.sf(UDakdedf_taquara_ML, level.UD=0.65, level=0.95)
+middle_polygon65 <- shapefile_polygons65[2,]
+area_m2_65 <-st_area(middle_polygon65)
+area_m2_65/10000
+
+shapefile_polygons60 <- as.sf(UDakdedf_taquara_ML, level.UD=0.60, level=0.95)
+middle_polygon60 <- shapefile_polygons60[2,]
+area_m2_60 <-st_area(middle_polygon60)
+area_m2_60/10000
+
+shapefile_polygons55 <- as.sf(UDakdedf_taquara_ML, level.UD=0.55, level=0.95)
+middle_polygon55 <- shapefile_polygons55[2,]
+area_m2_55 <-st_area(middle_polygon55)
+area_m2_55/10000
+
+shapefile_polygons50 <- as.sf(UDakdedf_taquara_ML, level.UD=0.50, level=0.95)
+middle_polygon50 <- shapefile_polygons50[2,]
+area_m2_50 <-st_area(middle_polygon50)
+area_m2_50/10000
+
+shapefile_polygons45 <- as.sf(UDakdedf_taquara_ML, level.UD=0.45, level=0.95)
+middle_polygon45 <- shapefile_polygons45[2,]
+area_m2_45 <-st_area(middle_polygon45)
+area_m2_45/10000
+
+shapefile_polygons40 <- as.sf(UDakdedf_taquara_ML, level.UD=0.40, level=0.95)
+middle_polygon40 <- shapefile_polygons40[2,]
+area_m2_40 <-st_area(middle_polygon40)
+area_m2_40/10000
+
+shapefile_polygons35 <- as.sf(UDakdedf_taquara_ML, level.UD=0.35, level=0.95)
+middle_polygon35 <- shapefile_polygons35[2,]
+area_m2_35 <-st_area(middle_polygon35)
+area_m2_35/10000
+
+shapefile_polygons30 <- as.sf(UDakdedf_taquara_ML, level.UD=0.30, level=0.95)
+middle_polygon30 <- shapefile_polygons30[2,]
+area_m2_30 <-st_area(middle_polygon30)
+area_m2_30/10000
+
+shapefile_polygons25 <- as.sf(UDakdedf_taquara_ML, level.UD=0.25, level=0.95)
+middle_polygon25 <- shapefile_polygons25[2,]
+area_m2_25 <-st_area(middle_polygon25)
+area_m2_25/10000
+
+shapefile_polygons20 <- as.sf(UDakdedf_taquara_ML, level.UD=0.20, level=0.95)
+middle_polygon20 <- shapefile_polygons20[2,]
+area_m2_20 <-st_area(middle_polygon20)
+area_m2_20/10000
+
+shapefile_polygons15 <- as.sf(UDakdedf_taquara_ML, level.UD=0.15, level=0.95)
+middle_polygon15 <- shapefile_polygons15[2,]
+area_m2_15 <-st_area(middle_polygon15)
+area_m2_15/10000
+
+shapefile_polygons10 <- as.sf(UDakdedf_taquara_ML, level.UD=0.10, level=0.95)
+middle_polygon10 <- shapefile_polygons10[2,]
+area_m2_10 <-st_area(middle_polygon10)
+area_m2_10/10000
+
+shapefile_polygons05 <- as.sf(UDakdedf_taquara_ML, level.UD=0.05, level=0.95)
+middle_polygon05 <- shapefile_polygons05[2,]
+area_m2_05 <-st_area(middle_polygon05)
+area_m2_05/10000
+
+shapefile_polygons01 <- as.sf(UDakdedf_taquara_ML, level.UD=0.01, level=0.95)
+middle_polygon01 <- shapefile_polygons01[2,]
+area_m2_01 <-st_area(middle_polygon01)
+area_m2_01/10000
+```
+
+## With all areas printed, I manually created the vectors with area and isopleths.
+
+```{r}
+area.href <- c(1.274447, 6.983761, 14.30958, 21.86846, 29.75736, 37.9813, 
+               46.65597, 55.83595, 65.6059, 76.09046, 87.44227, 99.81765, 
+               113.4802, 128.7344, 146.1137, 166.3771, 190.7048, 221.2212, 
+               262.1181, 325.7782, 453.4343)
+
+
+isopleth <- c(01, 05, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 
+              80, 85, 90, 95, 99)
+```
+
+## Then, create the data frame 
+```{r}
+HRsize <- data.frame(area.href = area.href, isopleth = isopleth)
+head(HRsize) 
+```
+
+## Calculate the percentage of total home range area represented by each isopleth
+```{r}
+HRsize$PA <- HRsize$area.href/(max(HRsize$area.href))*100 # add PA
+HRsize$IV <- HRsize$isopleth # add IV
+```
+
+## Identify the core area as the point of maximum deviation from area/%UD equality line
+```{r}
+with(HRsize, which((IV-PA) == max(IV-PA)))
+```
+
+## Change the value according to the result (IV row number indicated above (15))
+```{r}
+HRsize$IV[16] # 75% isopleth!
+```
+
+## Look what is the size of the home range at 75%
+```{r}
+HRsize # 166.377100ha 
+```
+
+## Plot to see the probability of uniform area use vs empirical area use in taquara
+```{r}
+plot(seq(0,100,length = 50), seq(0,100,length = 50), type = "l",lty = 3, 
+     lwd=2, xlab="Isopleth (%UD)", ylab="Proportion of total home range area (%)", 
+     main="Core area - taquara")
+lines(PA ~ IV, data = HRsize, col = 2, lwd=2)
+points(x = 75, y = 36.6926587, type = "p", lwd=2) ## change X according to value 
+# identified above and Y to meet the line
+```
+
+# Extract area in ha and errors:
+```{r}
+shapefile_polygons75 <- as.sf(UDakdedf_taquara_ML, level.UD=0.75, level=0.95)
+area_m2_75 <-st_area(shapefile_polygons75)
+area_m2_75/10000 # ha already!
+```
+
+# Santa Maria
+```{r}
+rm(list=ls())
+load("AKDE_sma.rda")
+```
+
+## Take a look at the model
+```{r}
+summary(UDakdedf_sma_ML)
+```
+
+## I will plot the akde home range estimation so I can see how it looks:
+```{r}
+plot(UDakdedf_sma_ML) # Looks good!
+```
+
+## I will now plot all isopleths (5% by 5% - from 1% home range estimation to 99%). It was the only way I coul manage this. Basically, I create a shapefile for each isopleth estimation and then extract the area. This allowed me to get the areas estimated in each isopleth.
+
+```{r}
+shapefile_polygons99 <- as.sf(UDakdedf_sma_ML, level.UD=0.99, level=0.95)
+middle_polygon99 <- shapefile_polygons99[2,]
+area_m2_99 <-st_area(middle_polygon99)
+area_m2_99/10000
+
+shapefile_polygons95 <- as.sf(UDakdedf_sma_ML, level.UD=0.95, level=0.95)
+middle_polygon95 <- shapefile_polygons95[2,]
+area_m2_95 <-st_area(middle_polygon95)
+area_m2_95/10000
+
+shapefile_polygons90 <- as.sf(UDakdedf_sma_ML, level.UD=0.90, level=0.95)
+middle_polygon90 <- shapefile_polygons90[2,]
+area_m2_90 <-st_area(middle_polygon90)
+area_m2_90/10000
+
+shapefile_polygons85 <- as.sf(UDakdedf_sma_ML, level.UD=0.85, level=0.95)
+middle_polygon85 <- shapefile_polygons85[2,]
+area_m2_85 <-st_area(middle_polygon85)
+area_m2_85/10000
+
+shapefile_polygons80 <- as.sf(UDakdedf_sma_ML, level.UD=0.80, level=0.95)
+middle_polygon80 <- shapefile_polygons80[2,]
+area_m2_80 <-st_area(middle_polygon80)
+area_m2_80/10000
+
+shapefile_polygons75 <- as.sf(UDakdedf_sma_ML, level.UD=0.75, level=0.95)
+middle_polygon75 <- shapefile_polygons75[2,]
+area_m2_75 <-st_area(middle_polygon75)
+area_m2_75/10000
+
+shapefile_polygons70 <- as.sf(UDakdedf_sma_ML, level.UD=0.70, level=0.95)
+middle_polygon70 <- shapefile_polygons70[2,]
+area_m2_70 <-st_area(middle_polygon70)
+area_m2_70/10000
+
+shapefile_polygons65 <- as.sf(UDakdedf_sma_ML, level.UD=0.65, level=0.95)
+middle_polygon65 <- shapefile_polygons65[2,]
+area_m2_65 <-st_area(middle_polygon65)
+area_m2_65/10000
+
+shapefile_polygons60 <- as.sf(UDakdedf_sma_ML, level.UD=0.60, level=0.95)
+middle_polygon60 <- shapefile_polygons60[2,]
+area_m2_60 <-st_area(middle_polygon60)
+area_m2_60/10000
+
+shapefile_polygons55 <- as.sf(UDakdedf_sma_ML, level.UD=0.55, level=0.95)
+middle_polygon55 <- shapefile_polygons55[2,]
+area_m2_55 <-st_area(middle_polygon55)
+area_m2_55/10000
+
+shapefile_polygons50 <- as.sf(UDakdedf_sma_ML, level.UD=0.50, level=0.95)
+middle_polygon50 <- shapefile_polygons50[2,]
+area_m2_50 <-st_area(middle_polygon50)
+area_m2_50/10000
+
+shapefile_polygons45 <- as.sf(UDakdedf_sma_ML, level.UD=0.45, level=0.95)
+middle_polygon45 <- shapefile_polygons45[2,]
+area_m2_45 <-st_area(middle_polygon45)
+area_m2_45/10000
+
+shapefile_polygons40 <- as.sf(UDakdedf_sma_ML, level.UD=0.40, level=0.95)
+middle_polygon40 <- shapefile_polygons40[2,]
+area_m2_40 <-st_area(middle_polygon40)
+area_m2_40/10000
+
+shapefile_polygons35 <- as.sf(UDakdedf_sma_ML, level.UD=0.35, level=0.95)
+middle_polygon35 <- shapefile_polygons35[2,]
+area_m2_35 <-st_area(middle_polygon35)
+area_m2_35/10000
+
+shapefile_polygons30 <- as.sf(UDakdedf_sma_ML, level.UD=0.30, level=0.95)
+middle_polygon30 <- shapefile_polygons30[2,]
+area_m2_30 <-st_area(middle_polygon30)
+area_m2_30/10000
+
+shapefile_polygons25 <- as.sf(UDakdedf_sma_ML, level.UD=0.25, level=0.95)
+middle_polygon25 <- shapefile_polygons25[2,]
+area_m2_25 <-st_area(middle_polygon25)
+area_m2_25/10000
+
+shapefile_polygons20 <- as.sf(UDakdedf_sma_ML, level.UD=0.20, level=0.95)
+middle_polygon20 <- shapefile_polygons20[2,]
+area_m2_20 <-st_area(middle_polygon20)
+area_m2_20/10000
+
+shapefile_polygons15 <- as.sf(UDakdedf_sma_ML, level.UD=0.15, level=0.95)
+middle_polygon15 <- shapefile_polygons15[2,]
+area_m2_15 <-st_area(middle_polygon15)
+area_m2_15/10000
+
+shapefile_polygons10 <- as.sf(UDakdedf_sma_ML, level.UD=0.10, level=0.95)
+middle_polygon10 <- shapefile_polygons10[2,]
+area_m2_10 <-st_area(middle_polygon10)
+area_m2_10/10000
+
+shapefile_polygons05 <- as.sf(UDakdedf_sma_ML, level.UD=0.05, level=0.95)
+middle_polygon05 <- shapefile_polygons05[2,]
+area_m2_05 <-st_area(middle_polygon05)
+area_m2_05/10000
+
+shapefile_polygons01 <- as.sf(UDakdedf_sma_ML, level.UD=0.01, level=0.95)
+middle_polygon01 <- shapefile_polygons01[2,]
+area_m2_01 <-st_area(middle_polygon01)
+area_m2_01/10000
+```
+
+## With all areas printed, I manually created the vectors with area and isopleths.
+
+```{r}
+area.href <- c(0.448188, 2.523605, 5.2199, 8.087039, 11.19635, 14.27741, 
+               17.51229, 20.92389, 24.57936, 28.4499, 32.5851, 37.03654, 
+               41.75009, 46.80041, 52.39897, 58.57856, 65.59301, 73.90276, 
+               84.39851, 100.0692, 128.0064)
+
+
+isopleth <- c(01, 05, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 
+              80, 85, 90, 95, 99)
+```
+
+## Then, create the data frame 
+```{r}
+HRsize <- data.frame(area.href = area.href, isopleth = isopleth)
+head(HRsize) 
+```
+
+## Calculate the percentage of total home range area represented by each isopleth
+```{r}
+HRsize$PA <- HRsize$area.href/(max(HRsize$area.href))*100 # add PA
+HRsize$IV <- HRsize$isopleth # add IV
+```
+
+## Identify the core area as the point of maximum deviation from area/%UD equality line
+```{r}
+with(HRsize, which((IV-PA) == max(IV-PA)))
+```
+
+## Change the value according to the result (IV row number indicated above (15))
+```{r}
+HRsize$IV[16] # 75% isopleth!
+```
+
+## Look what is the size of the home range at 75%
+```{r}
+HRsize #58.578560 ha 
+```
+
+## Plot to see the probability of uniform area use vs empirical area use in sma
+```{r}
+plot(seq(0,100,length = 50), seq(0,100,length = 50), type = "l",lty = 3, 
+     lwd=2, xlab="Isopleth (%UD)", ylab="Proportion of total home range area (%)", 
+     main="Core area - Santa Maria")
+lines(PA ~ IV, data = HRsize, col = 2, lwd=2)
+points(x = 75, y = 45.7622119, type = "p", lwd=2) ## change X according to value 
+# identified above and Y to meet the line
+```
+
+# Extract area in ha and errors:
+```{r}
+shapefile_polygons75 <- as.sf(UDakdedf_sma_ML, level.UD=0.75, level=0.95)
+area_m2_75 <-st_area(shapefile_polygons75)
+area_m2_75/10000 # ha already!
+```
