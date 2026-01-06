@@ -1,0 +1,2280 @@
+---
+title: "Feeding ecology and cognitive flexibility shape route planning across Central and South American primates"
+format: pdf
+editor: visual
+author: 
+  - name: Felipe Bufalo
+  - name: Mariana Antonia Raquel Breziski
+  - name: Erika Alejandra Chaves-Diaz
+  - name: Anne-Sophie de Almeida e Silva
+  - name: Sofya Dolotovskaya
+  - name: Raul Uriel Hernández-Sarabia
+  - name: Eckhard Heymann
+  - name: Renato Hilário
+  - name: Patrícia Izar
+  - name: Olivier Kaisin
+  - name: Marlon Lima
+  - name: Leticia Almeida Moura
+  - name: Andrea Presotto
+  - name: Rafael Reyna-Hurtado
+  - name: Antoine Siberdt
+  - name: João Pedro Souza-Alves
+  - name: Karen Barbara Strier
+  - name: Priscila Suscke
+  - name: Luca Börger
+  - name: Laurence Culot
+bibliography: references.bib
+---
+
+## Load packages
+
+```{r}
+#| output: FALSE
+#| warning: FALSE
+library(amt)
+library(cluster)
+library(circular)
+library(DHARMa)
+library(dplyr)
+library(emmeans)
+library(forcats)
+library(FSA)
+library(geosphere)
+library(ggeffects)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(lme4)
+library(lmerTest)
+library(lubridate)
+library(MASS)
+library(purrr)
+library(sf)
+library(spatstat)
+library(stringr)
+library(tidyr)
+library(vegan)
+library(zoo)
+library(knitr)
+library(kableExtra)
+library(ggforce)
+library(patchwork)
+library(car)
+library(broom)
+```
+
+In this script I provide the code necessary for the manuscript 'Feeding ecology and cognitive flexibility shape route planning across Central and South American primates'. In this study, we synthesize ranging and feeding data from primates across Central and South America to investigate how dietary strategies influence movement decisions and route structure. We hypothesize that the influence of feeding resources on route planning varies according to seasonality, spatial distribution, and their relative importance in the diet. Specifically, we expect that primates with higher degrees of folivory and faunivory—resources expected to be more evenly distributed, or to be aggregated at larger scales than single trees or patches of trees, or to present a lower predictability throughout the area—will show routes less strongly determined by feeding patches than frugivores and gummivores, expected to rely on more clumped and spatially stable resources. Consequently, we predict feeding sites such as fruiting or gum-producing trees to exert greater influence on route planning than unpredictable sites or associated with more uniform distributions. We also anticipate that species with greater degrees of frugivory and gummivory will display more linear daily paths, reflecting stronger spatial optimization toward predictable resource patches. Finally, we expect that species sharing similar dietary strategies will exhibit comparable movement patterns and levels of route linearity, indicating convergent decision-making processes shaped by feeding ecology.
+
+## Load data
+
+```{r}
+#| warning: FALSE
+# Have a look at the data gathered 
+df <- read.csv("1_alldata_FB_2025_09_d19_interpolated.csv")
+```
+
+## [1. Assessment of route objectives]{.underline}
+
+First, I need to understand my data and set the best q value for the CPT to find the largest number of CPs. **The q value represents the number of vectors to be considered by the CPT before each possible CP is found.** For that, I adapted @byrne2009 to run in loops the CPT for all q values, from 1 to 10. I considered alpha = 0.01, 10000 permutations and tolerance (tol) = 10 meters in order to remove GPS error at the study site.
+
+I converted the column "date" to factor to allow grouping the days into levels. Next step was creating an output datafame with a a column "q" for printing the "q" values which I am testing. Finally, we run the test for all "q" values (1:10) and all days. I also used alpha=0.01, N=10000, and tol=0.
+
+```{r}
+#| eval: false
+df$date <- as.factor(df$date)
+df$researcher <- as.factor(df$researcher)
+output_df <- df
+output_df$CP <- ""
+output_df$q <- ""
+output_df <- output_df[-c(1:nrow(output_df)),]; head(output_df)
+
+for (res in levels(df$researcher)) {
+  
+  data_res <- df[df$researcher == res, ]
+  
+  # Loop over dates for this researcher
+  for (date.prim in unique(data_res$date)) {
+    
+    data_date <- data_res[data_res$date == date.prim, ]
+    
+    # Skip if no rows
+    if (nrow(data_date) == 0) next
+    
+    # Loop over q values
+    for (q in 1:10) {
+      cat("Researcher:", res, "- Date:", date.prim, "- q =", q, "\n")
+      
+      datainp_g <- data_date
+      
+      # Extract coordinates (assuming colnames are x, y like in your df)
+      inp <- datainp_g[, c("x_interp", "y_interp")]
+      x1 <- inp[[1]]
+      x2 <- inp[[2]]
+    
+    # Inspect first few rows of the data
+    xy <- cbind(x1,x2)
+    head(xy)
+    
+    # INPUTS
+    # input alpha
+    # alpha = significance level
+    # alpha = 0.01 is a convenient default
+    alpha <- 0.01
+    
+    # input q
+    # Enter value of q
+    # q = 4 is used here just as an example.
+    # The user should replace this by a value of q
+    # that is appropriate for the species and data
+    # considered, e.g. that obtained by running CPT_Rcode
+    # on part of the data.
+    #q <- 6
+    
+    # input N
+    # N = total number of permutations (1 observed and N-1 simulated) 
+    # # N = 10000 is a convenient number
+    N <- 10000
+    
+    # input tol
+    # tol = tolerance
+    # = maximum distance between indistinguishable positions # tol = 0 is a 
+    # convenient default
+    # The user may like to replace this by
+    # twice the average GPS error in research area
+    tol <- 0
+    
+    # PRELIMINARIES
+    # Reverse the time-ordering,
+    # so that (bx1[1], bx2[1]) refers to (final)
+    #  putative goal
+    bx1 <- 0*x1
+    bx2 <- 0*x2
+    
+    n <- length(x1)
+    for (j in 1:n){
+      bx1[j] <- x1[n-j+1]
+      bx2[j] <- x2[n-j+1]
+    }
+    # Calculate the steps (bxdiff1, bxdiff2)
+    bx1diff <- diff(bx1)
+    bx2diff <- diff(bx2)
+    
+    # REMOVE POINTS AT WHICH ANIMAL STAYS STILL
+    # ind is (reverse) time ordering of points
+    # newp > 0 if point differs from previous point
+    tolsq <- tol^2
+    ind <- c(1:n)
+    newp <- c(1:n)
+    for (j in 2:n){
+      newp[j] <- ind[j]*( bx1diff[j-1]^2 + bx2diff[j-1]^2 > tolsq)
+    }
+    
+    # bz1, bz2 are coordinates of points(in reverse time order) 
+    # at which there is movement
+    bz1 <- bx1[newp >0]
+    bz2 <- bx2[newp >0]
+    nz <- length(bz1)
+    
+    # We shall apply the CPT to points with coordinates (bz1,bz2)
+    # Calculate the steps (bzdiff1, bzdiff2)
+    bz1diff <- diff(bz1)
+    bz2diff <- diff(bz2)
+    # SOME DECLARATIONS
+    # goal.no = number (from end) of current putative goal 
+    # (with goal.no = 1 for end position
+    
+    # Thus goal.no = goal.t + 1
+    # where goal.t was used in original code to refer to
+    # time of current putative goal (with goal.t = 0 
+    # for # end position # start with goal.no = 1
+    goal.no <- 1
+    
+    # last.no = number (backwards in time) of last position of 
+    # interest # last.no = length(bz1) is a convenient default
+    # (and includes all the positions)
+    last.no <- length(bz1)
+    no.of.nos <- length(bz1)
+    Rsumrand  <- rep(0, len=N)
+    Rsumrandr <- rep(0, len=N)
+    
+    # Pr will store observed p-values in a run of r
+    Pr <- rep(1, len=no.of.nos)
+    
+    # sig is a vector indicating whether or not
+    # waypoint k is detected as a possible change point: 
+    # sig[k] = 1 if change point detected at waypoint k 
+    # sig[k] = 0 otherwise
+    sig <- rep(0,nz)
+    
+    # k is number of steps in "k-leg"
+    k <- 0
+    
+    # LOOK (SEQUENTIALLY) FOR NEXT POSSIBLE CHANGE POINT 
+    
+    while(goal.no < last.no - q){
+      
+      print(goal.no)
+      
+      k <- 0
+      
+      # INCREASE k UNTIL NEXT POSSIBLE CHANGE POINT IS FOUND 
+      # Re-initialise Pr
+      Pr <- 0*Pr + 1
+      P <- 1
+      
+      while ((P > alpha) && (goal.no + q + k < last.no)){ 
+        #B
+        
+        k <- k + 1
+        
+        R1 <- sqrt((bz1[goal.no+k] - bz1[goal.no])^2 + (bz2[goal.no+k] - 
+                                                          bz2[goal.no])^2) 
+        R2 <- sqrt((bz1[goal.no+k+q] - bz1[goal.no+k])^2 + (bz2[goal.no+k+q] - 
+                                                              bz2[goal.no+k])^2)
+        Rsum <- R1 + R2
+        
+        # Rsumrand[1] = observed value of statistic R1 + R2 
+        Rsumrand[1] <- Rsum
+        
+        # Now calculate statistic R1 + R2 for a further N-1 
+        # random permutations and store in Rsumrand
+        for (it in 2:N){
+          # start of it loop C
+          u <- runif(k+q,0,1)
+          perm <- order(u)
+          bz1r <- bz1[goal.no]
+          bz2r <- bz2[goal.no]
+          for (j in 1:k){ # start of j loop D 
+            bz1r <- bz1r + bz1diff[goal.no-1+perm[j]] 
+            bz2r <- bz2r + bz2diff[goal.no-1+perm[j]]
+          } # end of j loop D
+          
+          R1rand <- sqrt((bz1r - bz1[goal.no])^2 + (bz2r - bz2[goal.no])^2)
+          R2rand <- sqrt((bz1[goal.no+k+q] - bz1r)^2 + 
+                           (bz2[goal.no+k+q] - bz2r)^2) 
+          Rsumrand[it] <- R1rand + R2rand
+        } # end of it loop C
+        
+        P <- sum(Rsumrand >= Rsum)/N
+        
+        Pr[k] <- P
+        
+      } # end of "while" on
+      # ((P > alpha) && (goal.no + q + k < last.no)) B
+      # f is the first value of k in the current run that is significant 
+      f <- k
+      
+      while ((P <= alpha) && (goal.no + q + k < last.no)){ 
+        #E
+        
+        k <- k+1
+        R1 <- sqrt((bz1[goal.no+k] - bz1[goal.no])^2 + 
+                     (bz2[goal.no+k] - bz2[goal.no])^2)
+        
+        R2 <- sqrt((bz1[goal.no+k+q] - bz1[goal.no+k])^2 + 
+                     (bz2[goal.no+k+q] - bz2[goal.no+k])^2)
+        
+        Rsum <- R1 + R2
+        
+        # Rsumrand[1] = observed value of statistic R1 + R2 
+        Rsumrand[1] <- Rsum
+        
+        # Now calculate statistic R1 + R2 for a further N-1 
+        # random permutations and store in Rsumrand
+        for (it in 2:N){ # start of it loop F
+          u <- runif(k+q,0,1)
+          perm <- order(u)
+          bz1r <- bz1[goal.no]
+          bz2r <- bz2[goal.no]
+          for (j in 1:k){ # start of j loop G 
+            bz1r <- bz1r + bz1diff[goal.no-1+perm[j]] 
+            bz2r <- bz2r + bz2diff[goal.no-1+perm[j]]
+          } # end of j loop G
+          
+          R1rand <- sqrt((bz1r - bz1[goal.no])^2 + 
+                           (bz2r - bz2[goal.no])^2)
+          R2rand <- sqrt((bz1[goal.no+k+q] - bz1r)^2 + 
+                           (bz2[goal.no+k+q] - bz2r)^2)      
+          Rsumrand[it] <- R1rand + R2rand
+        } # end of it loop F
+        
+        P <- sum(Rsumrand >= Rsum)/N
+        
+        Pr[k] <- P
+        
+      }  # end of "while" on
+      
+      # ((P < alpha) && (goal.no + q + k < last.no)) E
+      
+      # l is the last value of k in the current run that is significant 
+      l <- k - 1
+      
+      # apply "peak rule"
+      Pr[f:l]
+      rmin <- min(which(Pr[f:l] == min(Pr[f:l]))) 
+      rmin <- if(l >=f) rmin else 0
+      
+      goal.no <- ifelse(rmin > 0, goal.no + f + rmin - 1, last.no) 
+      
+      sig[goal.no] <- ifelse(goal.no == last.no,0,1)
+      
+    } # end of "while" on (goal.no < last.no - q) # A
+    
+    #  Remove putative goal from list of CP's
+    sig[1] <- 0
+    
+    # OUTPUTS
+    
+    # OUTPUT OF
+    # (first, last) (row nos. of first and last times at 
+    # "significant" change points)
+    # (east, north) (their coordinates)
+    # cp lists indices of waypoints identified as change points
+    cp <- which(sig==1)
+    
+    
+    # bsig is sig in reverse time-order
+    bsig <- rep(0,nz)
+    for (j in 1:nz){
+      bsig[j] <- sig[nz-j+1]
+    }
+    
+    # "times" (row nos.) and coordinates of change points 
+    newpp <- newp[newp > tol]
+    cp.time <- newpp[sig==1]
+    cp.bx1 <- bz1[sig==1]
+    cp.bx2 <- bz2[sig==1]
+    cp.no <- n + 1 - cp.time
+    # last is cp.no in reverse order
+    last <- 0*cp.no
+    cp.leng <- length(cp.no)
+    for (j in 1:cp.leng){
+      last[j] <- cp.no[cp.leng-j+1]
+    }
+    # last contains row nos. of (last times at) change points 
+    # (east, north) are their coordinates
+    east <- x2[last]
+    north <- x1[last]
+    
+    # first contains row nos. of first times at change points 
+    first <- 0*last
+    for (j in 1:length(last)){
+      first[j] <- n+2 - min(which(newp > (n+1-last[j])))
+    }
+    
+    # PLOT WAYPOINTS AND MARK CHANGE POINTS
+    # For plotting purposes, reverse the order of
+    # bz1, bz2 to get z1, z2
+    z1 <- 0*bz1
+    z2 <- 0*bz2
+    nz <- length(z1)
+    for (j in 1:nz){
+      z1[j] <- bz1[nz-j+1]
+      z2[j] <- bz2[nz-j+1]
+    }
+    # s is vector to index the points
+    s <- c(1:nz)
+    
+    # Save change-points
+    z1bsig <- z1[bsig==1]# Latitude of CPs
+    z2bsig <- z2[bsig==1]# Longitude of CPs
+    cpsame <- which(first == last)
+    cpdiff <- which(first != last)
+    lastsame <- last[cpsame]# Number of lines where CPs are located 
+    firstdiff <- first[cpdiff]
+    lastdiff <- last[cpdiff]
+    z1bsame <- z1bsig[cpsame]
+    z2bsame <- z2bsig[cpsame]
+    z1bdiff <- z1bsig[cpdiff]
+    z2bdiff <- z2bsig[cpdiff]
+    
+    
+    # Save results back into datainp_g
+      datainp_g$cp <- "NO-CP"
+      true.index <- which((datainp_g$x %in% z2bsig) & 
+                            (datainp_g$y %in% z1bsig))
+      datainp_g$cp[true.index] <- "CP"
+      datainp_g$q <- q
+      
+      # Append researcher and date info explicitly (just in case)
+      datainp_g$researcher <- res
+      datainp_g$date <- date.prim
+      
+      # Store output
+      output_df <- rbind(output_df, datainp_g)
+    }
+  }
+}
+
+write.csv(output_df, "output_df.csv")
+```
+
+Now, find the best value of q
+
+```{r}
+#| eval: false
+#|warning: false
+df_ori <- read.csv("output_cpt_all_2025_10_d15.csv")%>% 
+  # create identifier
+  mutate(identifier = paste0(primate_species, "_", sub("^(.*?),.*$", "\\1", researcher))) %>%
+  # group by identifier, date, q to compute lagged values
+  group_by(identifier, date, q) %>%
+  mutate(
+    # step length
+    sl = sqrt((x_interp - lag(x_interp))^2 + (y_interp - lag(y_interp))^2),
+    # previous cp indicator
+    prev_cp = case_when(
+      lag(cp) == "CP"    ~ 1,
+      lag(cp) == "NO-CP" ~ 0,
+      TRUE               ~ NA_real_),
+    lat_decimal = as.numeric(lat_decimal),
+    group_id = as.character(group_id),
+    # update cp based on sl and prev_cp
+    cp = if_else(sl == 0 & prev_cp == 1, "NO-CP", cp)) %>%
+  ungroup() %>% 
+  filter(identifier != "Sapajus cucullatus_Presotto") %>%
+  filter(!(identifier == "Plecturocebus cupreus_Dolotovskaya" & group_id != 1)) %>% 
+  mutate(group_behav = ifelse(group_behav == "" | is.na(group_behav), 
+                              "unknown", 
+                              group_behav))
+
+df_15 <- read.csv("output_10_15.csv")%>% 
+  # create identifier
+  mutate(identifier = paste0(primate_species, "_", sub("^(.*?),.*$", "\\1", researcher))) %>%
+  # group by identifier, date, q to compute lagged values
+  group_by(identifier, date, q) %>%
+  mutate(
+    # step length
+    sl = sqrt((x_interp - lag(x_interp))^2 + (y_interp - lag(y_interp))^2),
+    # previous cp indicator
+    prev_cp = case_when(
+      lag(cp) == "CP"    ~ 1,
+      lag(cp) == "NO-CP" ~ 0,
+      TRUE               ~ NA_real_),
+    # update cp based on sl and prev_cp
+    cp = if_else(sl == 0 & prev_cp == 1, "NO-CP", cp)) %>%
+  ungroup() %>% 
+  filter(identifier == "Sapajus cucullatus_Presotto")%>% 
+  mutate(group_behav = ifelse(group_behav == "" | is.na(group_behav), 
+                              "unknown", 
+                              group_behav)) %>% 
+  mutate(sampling_interval = 15)
+
+
+names(df_15) == names(df_ori)
+
+df_all <- bind_rows(df_15, df_ori)
+
+levels(as.factor(df_all$identifier))
+
+# Create output directory for plots
+plot_dir <- "CP_plots_final"
+if (!dir.exists(plot_dir)) dir.create(plot_dir)
+
+# --- Prepare the list of identifiers ---
+identifiers <- unique(df_all$identifier)
+
+# Container for all q_max summaries
+max_cp_results <- list()
+
+# --- Process the entire df (no nested lists) ---
+dataset_name <- "df"  # single dataset
+message("Processing dataset: ", dataset_name)
+
+# Container for per-identifier wide tables
+identifier_tables <- list()
+
+for (identifier_name in identifiers) {
+  df_sub <- df_all %>%
+    filter(identifier == identifier_name, cp == "CP")
+  
+  if (nrow(df_sub) == 0) next  # skip if no CPs
+  
+  # --- Group by q and date ---
+  df_cp_summary <- df_sub %>%
+    group_by(q, date) %>%
+    summarise(n_cp = n(), .groups = "drop")
+  
+  # --- Convert to wide format ---
+  df_wide <- df_cp_summary %>%
+    pivot_wider(
+      names_from = date,
+      values_from = n_cp,
+      values_fill = 0
+    ) %>%
+    mutate(TOTAL = rowSums(across(-q))) %>%
+    arrange(q)
+  
+  identifier_tables[[identifier_name]] <- df_wide
+}
+
+# --- Determine layout for plotting all identifiers on one page ---
+n_identifiers <- length(identifier_tables)
+ncol <- ceiling(sqrt(n_identifiers))
+nrow <- ceiling(n_identifiers / ncol)
+
+png_filename <- file.path(plot_dir, paste0("best_q_", dataset_name, ".png"))
+png(png_filename, width = 2400, height = 1600, res = 200)
+par(mfrow = c(nrow, ncol), mar = c(4, 4, 3, 1))
+
+# Summary table for identifiers
+summary_table <- data.frame(
+  identifier = character(),
+  q_max = numeric(),
+  max_CP = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# --- Plot each identifier ---
+for (identifier_name in names(identifier_tables)) {
+  data <- identifier_tables[[identifier_name]]
+  date_cols <- setdiff(names(data), c("q", "TOTAL"))
+  xlim <- c(1, max(data$q, na.rm = TRUE))
+  ylim <- c(1, max(data[, -1], na.rm = TRUE))
+  
+  # Base plot for first date
+  plot(data$q, data[[date_cols[1]]],
+       type = "o", pch = 20, col = "gray59",
+       xlab = "q", ylab = "Number of change-points",
+       xlim = xlim, ylim = ylim,
+       main = identifier_name)
+  
+  # Add remaining date curves
+  for (colname in date_cols[-1]) {
+    points(data$q, data[[colname]], type = "o", pch = 20, col = "gray59")
+  }
+  
+  # Add TOTAL curve in black
+  points(data$q, data$TOTAL, type = "o", pch = 20, col = "black", lwd = 3)
+  
+  # Compute q_max
+  max_idx <- which.max(data$TOTAL)
+  q_max <- data$q[max_idx]
+  max_CP <- data$TOTAL[max_idx]
+  
+  # --- NEW: vertical red line for q_max ---
+  abline(v = q_max, col = "red", lwd = 2)
+  
+  # Store summary
+  summary_table <- rbind(summary_table,
+                         data.frame(identifier = identifier_name,
+                                    q_max = q_max,
+                                    max_CP = max_CP))
+}
+
+dev.off()
+message("✅ Saved combined plot page: ", png_filename)
+
+# --- Save summary ---
+max_cp_summary <- summary_table
+#write.csv(max_cp_summary, file.path(plot_dir, "max_cp_summary.csv"), row.names = FALSE)
+max_cp_summary
+
+df_filtered <- df_all %>%
+  left_join(max_cp_summary, by = "identifier") %>%  # add q_max column
+  filter(q == q_max) %>%                            # keep only matching q values
+  dplyr::select(-q_max, -max_CP)                   # remove extra columns if desired
+```
+
+Bellow we can assess the best values of q for each study included in this research. We filtered the output dataframe according to the best q value identified by the CPT.
+
+![Number of Change Points (CPs) detected for each q value (ranging from 0 to 10) across all full-day follows for each primate species and set of data. Black lines represent the total number of CPs identified for each q value when aggregating all days for each primate species and set of data, while the gray lines show the number of CPs detected per day. For each primate species and set of data, the selected q value is indicated by a red line. Selected q values correspond to the last value at which the number of CPs showed a continuous increase.](best_q_df.png)
+
+### Assess the effect of sampling interval on the sensitivity of CPT
+
+As different primates and research questions ask for different sampling strategies, our dataset is composed by primate ranging data collected at different sampling intervals (from 5 minutes between scans to 30 minute intervals). As a supplementary analysis, I will fit a test investigate if there is an impact of sampling interval, and what its size, on the sensitivity of the CPT to identify CPs. In other words, here I test if the number of CPs identified is affected by the sampling interval.
+
+For that, I previously selected 10 days from each of the data frames in which primate data was originally sampled at 5 minutes intervals. Then, I created, from each original data frame, new data frames with rarefied sampling intervals of 10, 15, 20, 25, and 30 minutes. Finally, I ran the CPT on each of these rarefied data frames. Bellow, I present the code necessary for the comparison of the CPT applied to the rarefied data frames and the necessary data management for the comparisons to be made.
+
+```{r}
+#| warning: FALSE
+# Load data
+df_10 <- read.csv("output_10_10.csv") %>%
+  # create identifier
+  mutate(identifier = paste0(primate_species, "_", sub("^(.*?),.*$", "\\1", researcher))) %>%
+  # group by identifier, date, q to compute lagged values
+  group_by(identifier, date, q) %>%
+  mutate(
+    # step length
+    sl = sqrt((x_interp - lag(x_interp))^2 + (y_interp - lag(y_interp))^2),
+    # previous cp indicator
+    prev_cp = case_when(
+      lag(cp) == "CP"    ~ 1,
+      lag(cp) == "NO-CP" ~ 0,
+      TRUE               ~ NA_real_),
+    # update cp based on sl and prev_cp
+    cp = if_else(sl == 0 & prev_cp == 1, "NO-CP", cp)) %>%
+  ungroup()
+
+df_15 <- read.csv("output_10_15.csv")%>% 
+  # create identifier
+  mutate(identifier = paste0(primate_species, "_", sub("^(.*?),.*$", "\\1", researcher))) %>%
+  # group by identifier, date, q to compute lagged values
+  group_by(identifier, date, q) %>%
+  mutate(
+    # step length
+    sl = sqrt((x_interp - lag(x_interp))^2 + (y_interp - lag(y_interp))^2),
+    # previous cp indicator
+    prev_cp = case_when(
+      lag(cp) == "CP"    ~ 1,
+      lag(cp) == "NO-CP" ~ 0,
+      TRUE               ~ NA_real_),
+    # update cp based on sl and prev_cp
+    cp = if_else(sl == 0 & prev_cp == 1, "NO-CP", cp)) %>%
+  ungroup()
+
+df_20 <- read.csv("output_10_20.csv")%>% 
+  # create identifier
+  mutate(identifier = paste0(primate_species, "_", sub("^(.*?),.*$", "\\1", researcher))) %>%
+  # group by identifier, date, q to compute lagged values
+  group_by(identifier, date, q) %>%
+  mutate(
+    # step length
+    sl = sqrt((x_interp - lag(x_interp))^2 + (y_interp - lag(y_interp))^2),
+    # previous cp indicator
+    prev_cp = case_when(
+      lag(cp) == "CP"    ~ 1,
+      lag(cp) == "NO-CP" ~ 0,
+      TRUE               ~ NA_real_),
+    # update cp based on sl and prev_cp
+    cp = if_else(sl == 0 & prev_cp == 1, "NO-CP", cp)) %>%
+  ungroup()
+
+df_25 <- read.csv("output_10_25.csv")%>% 
+  # create identifier
+  mutate(identifier = paste0(primate_species, "_", sub("^(.*?),.*$", "\\1", researcher))) %>%
+  # group by identifier, date, q to compute lagged values
+  group_by(identifier, date, q) %>%
+  mutate(
+    # step length
+    sl = sqrt((x_interp - lag(x_interp))^2 + (y_interp - lag(y_interp))^2),
+    # previous cp indicator
+    prev_cp = case_when(
+      lag(cp) == "CP"    ~ 1,
+      lag(cp) == "NO-CP" ~ 0,
+      TRUE               ~ NA_real_),
+    # update cp based on sl and prev_cp
+    cp = if_else(sl == 0 & prev_cp == 1, "NO-CP", cp)) %>%
+  ungroup()
+
+df_30 <- read.csv("output_10_30.csv")%>% 
+  # create identifier
+  mutate(identifier = paste0(primate_species, "_", sub("^(.*?),.*$", "\\1", researcher))) %>%
+  # group by identifier, date, q to compute lagged values
+  group_by(identifier, date, q) %>%
+  mutate(
+    # step length
+    sl = sqrt((x_interp - lag(x_interp))^2 + (y_interp - lag(y_interp))^2),
+    # previous cp indicator
+    prev_cp = case_when(
+      lag(cp) == "CP"    ~ 1,
+      lag(cp) == "NO-CP" ~ 0,
+      TRUE               ~ NA_real_),
+    # update cp based on sl and prev_cp
+    cp = if_else(sl == 0 & prev_cp == 1, "NO-CP", cp)) %>%
+  ungroup()
+
+df_ori <- read.csv("output_cpt_all_2025_10_d15.csv")%>% 
+  # create identifier
+  mutate(identifier = paste0(primate_species, "_", sub("^(.*?),.*$", "\\1", researcher))) %>%
+  # group by identifier, date, q to compute lagged values
+  group_by(identifier, date, q) %>%
+  mutate(
+    # step length
+    sl = sqrt((x_interp - lag(x_interp))^2 + (y_interp - lag(y_interp))^2),
+    # previous cp indicator
+    prev_cp = case_when(
+      lag(cp) == "CP"    ~ 1,
+      lag(cp) == "NO-CP" ~ 0,
+      TRUE               ~ NA_real_),
+    # update cp based on sl and prev_cp
+    cp = if_else(sl == 0 & prev_cp == 1, "NO-CP", cp)) %>%
+  ungroup()
+
+df_5 <- df_ori %>% filter(sampling_interval == 5)
+
+all_researchers <- list(
+  df5 = split(df_5, df_5$identifier),
+  df10 = split(df_10, df_10$identifier),
+  df15 = split(df_15, df_15$identifier),
+  df20 = split(df_20, df_20$identifier),
+  df25 = split(df_25, df_25$identifier),
+  df30 = split(df_30, df_30$identifier)
+)
+
+# Store original datasets in a list
+all_dfs <- list(df5 = df_5, df10 = df_10, df15 = df_15, df20 = df_20, 
+                df25 = df_25, df30 = df_30)
+
+# Filtered datasets container
+filtered_dfs <- list()
+
+for (dataset_name in names(all_dfs)) {
+  df <- all_dfs[[dataset_name]]
+  
+  # Subset of q_max values for this dataset (using identifier)
+  q_max_subset <- read.csv("max_cp_summary_all.csv") %>%
+    filter(dataset == dataset_name) %>%
+    dplyr::select(identifier, q_max)
+  
+  # Join q_max to original dataset and filter by matching q
+  df_filtered <- df %>%
+    left_join(q_max_subset, by = "identifier") %>%
+    filter(q == q_max) %>%
+    dplyr::select(-q_max) %>%  # optional: remove helper column
+    mutate(df = dataset_name)  # add a column identifying the dataset
+  
+  filtered_dfs[[dataset_name]] <- df_filtered
+}
+
+filtered_dfs$df10  # check one example
+combined_filtered <- filtered_dfs %>%
+  purrr::map(~ .x %>%
+               mutate(lat_decimal = as.numeric(lat_decimal),
+                      long_decimal = as.numeric(long_decimal))) %>%
+  bind_rows()
+
+# Split by identifier (instead of researcher)
+identifier_dfs <- combined_filtered %>%
+  group_by(identifier) %>%
+  group_split() %>%
+  # name each list element by identifier
+  setNames(unique(combined_filtered$identifier))
+
+# Summarize number of CPs per dataset, q, and date
+df_cp_summary_df <- map_dfr(names(identifier_dfs), function(identifier_name) {
+  df <- identifier_dfs[[identifier_name]]
+  
+  df %>%
+    filter(cp == "CP") %>%
+    group_by(df, identifier, q, date) %>%
+    summarise(n_cp = n(), .groups = "drop") %>%
+    rename(dataset = df)
+})
+```
+
+Now, we can fit the model and run pairwise comparisons between different sampling intervals.
+
+```{r}
+# Make sure dataset is a factor so it orders nicely
+df_cp_summary_df <- df_cp_summary_df %>%
+  mutate(dataset = factor(dataset, levels = c("df5","df10", "df15", "df20", 
+                                              "df25", "df30")))
+
+summary(fit <- glm(n_cp ~ dataset * identifier, data = df_cp_summary_df, family = poisson))
+
+emm <- emmeans(fit, ~ dataset | identifier, type = "response")
+pairwise_df <- pairs(emm, adjust = "tukey") %>% 
+  summary(infer = TRUE, adjust = "tukey") %>% 
+  as.data.frame()
+pairwise_df
+
+sig_df <- pairwise_df %>%
+  filter(p.value < 0.05) %>%
+  mutate(
+    identifier = as.character(identifier),
+    group1 = sub(" / .*", "", contrast),
+    group2 = sub(".* / ", "", contrast),
+    annotation = case_when(
+      p.value < 0.001 ~ "p < 0.001",
+      TRUE ~ paste0("p = ", formatC(p.value, format = "f", digits = 3))
+    )
+  ) %>%
+  dplyr::select(identifier, group1, group2, annotation) %>%
+  group_by(identifier) %>%
+  mutate(
+    y_base = max(df_cp_summary_df$n_cp[df_cp_summary_df$identifier == unique(identifier)]),
+    y_position = y_base + row_number() * .9
+  ) %>%
+  ungroup()
+head(sig_df)
+
+# Prepare the plot
+n_cps_day <- ggplot(df_cp_summary_df, aes(x = dataset, y = n_cp)) +
+  geom_boxplot(outlier.shape = NA, color = "black") +
+  geom_jitter(width = 0.2, alpha = 0.7, color = "gray40", size = 2) +
+  facet_wrap(~ identifier, ncol = 4) +
+  geom_signif(data = sig_df, 
+              aes(xmin = group1, xmax = group2, y_position = y_position, 
+                  annotations = annotation), 
+              manual = TRUE, tip_length = 0.03, textsize = 3) +
+  scale_x_discrete(
+    labels = c("df5" = "5", "df10" = "10", "df15" = "15", 
+               "df20" = "20", "df25" = "25", "df30" = "30")) +
+  labs(x = "Sampling interval (min)", y = "Number of CPs per day") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio = 1,
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size = 20),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 20),
+        strip.text = element_text(size = 8, face = "bold"),
+        legend.margin = margin(t = -20, r = 0, b = 0, l = 0))
+```
+
+Overall, we found that changes between five and 15 minutes in sampling interval did not significantly influence the number of CPs detected per day for most species @fig-0. Significant differences were observed only for *Callithrix flaviceps*, *Leontopithecus chrysopygus*, and *Sapajus cucullatus*, primarily between the 5-minute interval and intervals of 20 minutes or longer. Among all studies, *Leontopithecus chrysopygus*\_Silva (and somewhat also *Leontopithecus chrysopygus*\_Breziski) was the only one showing a consistent decrease in the number of CPs detected per day as the sampling interval increased from five minutes to longer intervals, which is in accordance with the fact this species displayed the highest number of CPs per day.
+
+```{r}
+#| label: fig-0
+#| fig-width: 10
+#| fig-height: 6
+#| fig-cap: |
+#|       Comparisons between the number of daily Change Points (CPs) identified across sampling intervals within studies sampled originally at five minutes intervals, as predicted by a Generalized Linear Model with Poisson distribution and log link function. Within each study, we rarefied sampling intervals from five to 30-minutes between consecutive GPS relocations to assess the effect of sampling interval on the sensitivity of the Change Point Test. Pairwise significant comparisons and respective p values with Bonferroni correction are shown above the boxplots. 
+#| warning: FALSE
+n_cps_day  
+#Export high resolution png file  
+#ggsave(filename = "n_cps_day.png", plot = n_cps_day, width = 12, height = 8, 
+       #units = "in", dpi = 600, bg = "white")
+```
+
+## [2. Influence of feeding patches on route planning]{.underline}
+
+To understand what is the importance of feeding items for the route planning processes used by each primate and also quantify such importance, I will compute CP ratios for feeding CPs and also for feeding CPs associated with specific food types. CP Ratios were defined as the number of CPs associated with a given behavior (e.g., frugivory, gummivory, folivory, other—non-feeding scans), divided by the total number of times that behavior was observed in the scans [@noser2013]. Values close to 1 indicate that the behavior strongly influenced daily route orientation. On the other hand, values close to 0 suggest that the behavior is mostly frequent in locations not used to orient daily routes and, therefore, probably opportunistically displayed while traveling to reach farther goals.
+
+```{r}
+#| warning: FALSE
+# Load data to work with. Data here is the result of the CPT applied to 
+# primate ranging data and already filtered according to best q values.
+df_filtered <- read.csv("df_filtered.csv") %>% 
+  filter(full_day != "x")
+
+# Summarize the data obtained
+summary_table <- df_filtered %>%
+  mutate(year = year(dmy(date))) %>%  # extract year from date
+  group_by(subfamily, primate_species, researcher, season, period_season, 
+           study_locality, year) %>%
+  summarise(n_dates = n_distinct(date), .groups = "drop") %>%
+  arrange(primate_species, season, study_locality, year, researcher)
+
+kable(summary_table, booktabs = TRUE) %>%
+  kable_styling(font_size = 4,latex_options = "scale_down")
+```
+
+```{r}
+#| warning: FALSE
+# Start with CP_ratios
+cp_ratio_df <- df_filtered %>%
+  mutate(group_behav = ifelse(group_behav == "" | is.na(group_behav), 
+                              "unknown", 
+                              group_behav)) %>% 
+  mutate(group_behav = fct_collapse(as.factor(group_behav),
+                                    feeding = c("folivory", "foraging",
+                                                "faunivory", "feeding", 
+                                                "frugivory", "mycophagy", 
+                                                "feeding_seed", "gummivory", 
+                                                "florivory", "feeding_palm", 
+                                                "feeding_root"),
+                                    other = c("calling", "inactive", 
+                                              "lost", "moving", "other", 
+                                              "unknown", "resting", 
+                                              "social", "social_aff", 
+                                              "social_affiliative", 
+                                              "social_agonistic", "anting")),
+         group_behav = droplevels(group_behav)) %>%
+  # total scans per identifier × df
+  group_by(identifier, season, group_behav, sampling_interval) %>%
+  mutate(total_scan = n()) %>%
+  ungroup() %>%
+  # filter only CPs and count per group_behav
+  filter(cp == "CP") %>%
+  group_by(identifier, season, group_behav, sampling_interval) %>%
+  summarise(cp_count = n(),
+            total_scan = first(total_scan),  # repeat total_scan for this group
+            .groups = "drop") %>%
+  mutate(
+    season = factor(season, levels = c("wet", "dry")),
+    cp_ratio = cp_count / total_scan,
+    group_behav = factor(group_behav, levels = c("feeding", "other")),
+    identifier = factor(identifier, levels = c(
+      "Alouatta guariba_Chaves-Diaz",
+      "Alouatta pigra_Hernandez-Sarabia",
+      "Ateles geofroyii vellerosus_Hernandez-Sarabia",
+      "Brachyteles arachnoides_Moura",
+      "Brachyteles hypoxanthus_Lima",
+      "Callicebus coimbrai_Souza-Alves",
+      "Callithrix flaviceps_Hilario",
+      "Callithrix jacchus_Souza-Alves",
+      "Leontocebus nigrifrons_Culot",
+      "Leontopithecus chrysopygus_Breziski",
+      "Leontopithecus chrysopygus_Silva",
+      "Plecturocebus cupreus_Dolotovskaya",
+      "Sapajus cucullatus_Kaisin", 
+      "Sapajus cucullatus_Presotto",
+      "Sapajus xanthosternos_Suscke",
+      "Tamarinus mystax_Culot"
+    ))
+  )
+
+kable(head(cp_ratio_df), booktabs = TRUE) %>%
+  kable_styling(font_size = 6,latex_options = "scale_down")
+
+# Create a separate dataset with one sampling_interval per identifier
+sampling_labels <- cp_ratio_df %>%
+  distinct(identifier, sampling_interval)
+
+# Plot
+# Create the plot object first
+p <- ggplot(cp_ratio_df, aes(x = season, y = cp_ratio, fill = group_behav)) +
+  geom_col(position = position_dodge2(width = 0.9, preserve = "single"), 
+           width = 0.7, color = "black", linewidth = 0.5) +
+  facet_wrap(~ identifier, ncol = 4) +
+  scale_fill_manual(values = c("feeding" = "gray25", "other" = "gray80"),
+                    labels = c("feeding" = "Feeding", "other" = "Other")) +
+  geom_text(aes(label = cp_count), 
+            position = position_dodge2(width = 0.7, preserve = "single"), 
+            vjust = -1.9, lineheight = 0.6, size = 3, color = "black") +
+  geom_text(aes(label = "\n___\n"), 
+            position = position_dodge2(width = 0.7, preserve = "single"), 
+            vjust = -0.3, lineheight = 0.6, size = 3, color = "black") +
+  geom_text(aes(label = total_scan), 
+            position = position_dodge2(width = 0.7, preserve = "single"), 
+            vjust = -.2, lineheight = 0.6, size = 3, color = "black") +
+  geom_text(data = sampling_labels,
+            aes(label = paste0("Δt = ", sampling_interval)),
+            x = Inf, y = Inf,
+            hjust = 1.1, vjust = 1.5,
+            size = 4, color = "black",
+            inherit.aes = FALSE) +
+  labs(x = "", y = "CP Ratios") +
+  scale_x_discrete(labels = c("wet" = "Rainy", "dry" = "Dry")) +
+  scale_y_continuous(limits = c(0, .12), expand = c(0, 0)) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    axis.text.y = element_text(size = 18, color = "black"),
+    axis.text.x = element_text(size = 18, color = "black"),
+    axis.title.y = element_text(size = 20),
+    axis.title.x = element_text(size = 20),
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 20),
+    strip.text = element_text(size = 8, face = "bold"),
+    legend.margin = margin(t = -20, r = 0, b = 0, l = 0))
+```
+
+In @fig-1 it is possible to see the estimated importance of feeding items for route planning for each of the primate studies included.
+
+```{r}
+#| label: fig-1
+#| fig-width: 10
+#| fig-height: 6
+#| fig-cap: |
+#|       Feeding and Other CP Ratios for each of the primate species included in the present study
+#| warning: FALSE    
+p
+# Save as high-resolution PNG
+#ggsave(filename = "cp_ratio_plot.png", plot = p, width = 12, height = 8, 
+ #     units = "in", dpi = 600, bg = "white")
+```
+
+We can organize CPs into feeding CPs and Other CPs to have an understanding of how feeding resources influence route planning across primate species.
+
+```{r}
+#| eval: false
+#| warning: FALSE
+# For reporting, I will summarize cps for each species
+cp_summary <- cp_ratio_df %>%
+  group_by(identifier, season, group_behav) %>%
+  summarise(total_cp = sum(cp_count), .groups = "drop") %>%
+  tidyr::pivot_wider(
+    names_from = group_behav,
+    values_from = total_cp,
+    names_prefix = "cp_"
+  ) %>%
+  mutate(total_cp_all = cp_feeding + cp_other)
+
+# Create 'identifier' column in summary_table to match cp_summary
+summary_table_join <- summary_table %>%
+  mutate(
+    researcher_clean = str_extract(researcher, "^[^,;]+"),
+    identifier = paste(primate_species, researcher_clean, sep = "_")) %>%
+  dplyr::select(subfamily, primate_species, identifier, season, 
+                researcher, n_dates)
+
+# Join n_dates into cp_summary
+cp_summary_full <- cp_summary %>%
+  left_join(summary_table_join, by = c("identifier", "season")) %>% 
+  dplyr::select(subfamily, primate_species, season, cp_feeding, cp_other, 
+                total_cp_all, researcher, n_dates)
+
+kable(cp_summary_full, booktabs = TRUE) %>%
+  kable_styling(font_size = 4,latex_options = "scale_down")
+```
+
+Now we estimate CP ratios for specific food items.
+
+```{r}
+# Estimate CP ratios for feeding items
+names(df_filtered)
+levels(as.factor(df_filtered$food_type))
+# Start with CP_ratios
+ratio_item <- df_filtered %>%
+  mutate(group_behav = ifelse(group_behav == "" | is.na(group_behav), 
+                              "unknown", 
+                              group_behav)) %>% 
+  mutate(group_behav = fct_collapse(as.factor(group_behav),
+                                    feeding = c("folivory", "foraging",
+                                                "faunivory", "feeding", 
+                                                "frugivory", "mycophagy", 
+                                                "feeding_seed", "gummivory", 
+                                                "florivory", "feeding_palm", 
+                                                "feeding_root"),
+                                    other = c("calling", "inactive", 
+                                              "lost", "moving", "other", 
+                                              "unknown", "resting", 
+                                              "social", "social_aff", 
+                                              "social_affiliative", 
+                                              "social_agonistic", "anting")),
+         group_behav = droplevels(group_behav)) %>%
+  # total scans per identifier × df
+  group_by(identifier, season, group_behav, food_type, sampling_interval) %>%
+  mutate(total_scan = n()) %>%
+  ungroup() %>%
+  # filter only CPs and count per group_behav
+  filter(cp == "CP") %>%
+  group_by(identifier, season, group_behav, food_type, sampling_interval) %>%
+  summarise(cp_count = n(),
+            total_scan = first(total_scan),  # repeat total_scan for this group
+            .groups = "drop") %>%
+  mutate(
+    season = factor(season, levels = c("wet", "dry")),
+    cp_ratio = cp_count / total_scan,
+    group_behav = factor(group_behav, levels = c("feeding", "other")),
+    food_type = factor(food_type, levels = c("animal", "bark", "flower", 
+                                             "fruit", "fungus", "gum", "leaf", 
+                                             "palm heart", "root", "seed",
+                                             "unknown")),
+    identifier = factor(identifier, levels = c(
+      "Alouatta guariba_Chaves-Diaz",
+      "Alouatta pigra_Hernandez-Sarabia",
+      "Ateles geofroyii vellerosus_Hernandez-Sarabia",
+      "Brachyteles arachnoides_Moura",
+      "Brachyteles hypoxanthus_Lima",
+      "Callicebus coimbrai_Souza-Alves",
+      "Callithrix flaviceps_Hilario",
+      "Callithrix jacchus_Souza-Alves",
+      "Leontocebus nigrifrons_Culot",
+      "Leontopithecus chrysopygus_Breziski",
+      "Leontopithecus chrysopygus_Silva",
+      "Plecturocebus cupreus_Dolotovskaya",
+      "Sapajus cucullatus_Kaisin", 
+      "Sapajus cucullatus_Presotto",
+      "Sapajus xanthosternos_Suscke",
+      "Tamarinus mystax_Culot"
+    ))
+  ) %>% 
+  group_by(identifier, season, food_type) %>%
+  summarise(
+    cp_count = sum(cp_count, na.rm = TRUE),
+    total_scan = sum(total_scan, na.rm = TRUE),
+    cp_ratio = cp_count / total_scan,
+    sampling_interval = first(sampling_interval),
+    .groups = "drop"
+  ) %>% 
+  filter(food_type != "unknown" | is.na(food_type)) %>% 
+  filter(is.na(food_type) | food_type %in% names(table(food_type))[table(food_type) > 0]) %>%
+  filter(!is.na(food_type)) %>%
+  droplevels()
+
+head(ratio_item)
+
+guild_colors <- c(
+  "animal" = "#E69F00",       # orange
+  "fruit" = "#56B4E9",        # sky blue
+  "fungus" = "#009E73",       # green
+  "gum" = "#F0E442",          # yellow
+  "leaf" = "plum3",           # violet
+  "palm heart" = "#D55E00",   # reddish orange (warm, contrasts leaf & fruit)
+  "seed" = "#999999",         # neutral gray (distinct yet subtle)
+  "unknown" = "#000000"       # black (standard for undefined/unknown)
+)
+
+# Plot
+p2 <- ggplot(ratio_item, aes(x = season, y = cp_ratio, fill = food_type)) +
+  geom_col(position = position_dodge2(width = 0.9, preserve = "single"), 
+           width = 0.7, color = "black", linewidth = 0.5, alpha = 0.6) +
+  facet_wrap(~ identifier, ncol = 4) +
+  geom_text(aes(label = cp_count), 
+            position = position_dodge2(width = 0.7, preserve = "single"), 
+            vjust = -1.9, lineheight = 0.6, size = 3, color = "black") +
+  geom_text(aes(label = "\n___\n"), 
+            position = position_dodge2(width = 0.7, preserve = "single"), 
+            vjust = -0.3, lineheight = 0.6, size = 3, color = "black") +
+  geom_text(aes(label = total_scan), 
+            position = position_dodge2(width = 0.7, preserve = "single"), 
+            vjust = -.2, lineheight = 0.6, size = 3, color = "black") +
+  geom_text(data = sampling_labels,
+            aes(label = paste0("Δt = ", sampling_interval)),
+            x = Inf, y = Inf, hjust = 1.1, vjust = 1.5, 
+            size = 4, color = "black", inherit.aes = FALSE) +
+  labs(x = "", y = "CP Ratios") +
+  scale_x_discrete(labels = c("wet" = "Rainy", "dry" = "Dry")) +
+  scale_y_continuous(limits = c(0, .35), expand = c(0, 0)) +
+  scale_fill_manual(
+    name = NULL,
+    values = guild_colors,
+    labels = str_to_title(names(guild_colors))
+  ) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size = 20),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 20),
+        strip.text = element_text(size = 8, face = "bold"),
+        legend.margin = margin(t = -20, r = 0, b = 0, l = 0)) +
+  guides(fill = guide_legend(ncol = 7))
+```
+
+In @fig-2 we can see the importance of each of the identified feeding items for the route planning of the primate species included.
+
+```{r}
+#| label: fig-2
+#| fig-width: 10
+#| fig-height: 6
+#| fig-cap: |
+#|       Change Point (CP) Ratios, computed as the number of CPs divided by the total number of scans within each behavioral category across primate species and sets of data. The number of CPs and total number of scans for each behavior category are indicated above the bars. Δt label shows the interval between consecutive scan samplings used for each study. 
+#| warning: FALSE
+p2
+# Save as high-resolution PNG
+#ggsave(filename = "cp_ratio_feeding_plot.png", plot = p2, width = 12, 
+ #    height = 8, units = "in", dpi = 600, bg = "white")
+```
+
+Now we aim at testing if the importance of feeding resources change according to feeding guild and seasonality. Start by organizing the data.
+
+```{r}
+#| warning: FALSE
+ratio_item_sc_test_q <- read.csv("ratio_item_sc_q.csv")
+ratio_item_sc_test_q$ratio_log <- ratio_item_sc_test_q$cp_count/
+  ratio_item_sc_test_q$total_scan
+ratio_item_sc_test_q$ratio_log <- log(ratio_item_sc_test_q$ratio_log+0.0001)
+
+ratio_item_sc_test_q <- ratio_item_sc_test_q %>% 
+  group_by(identifier) %>% 
+  left_join(df_filtered %>% dplyr::select(identifier, area = study_locality),
+            by = c("identifier")) %>% 
+  unique()
+
+# Relabel factor levels
+ratio_item_sc_test_q$guild_overall <- factor(
+  ratio_item_sc_test_q$guild_overall,
+  levels = c("gum", "animal", "fruit", "leaf", "fungus"),
+  labels = c("Gummivores", "Faunivores", "Frugivores", 
+             "Folivores", "Fungivores"))
+
+ratio_item_sc_test_q$season <- factor(ratio_item_sc_test_q$season,
+                                    levels = c("dry", "wet"),
+                                    labels = c("Dry", "Rainy"))
+ratio_item_sc_test_q$area <- as.factor(ratio_item_sc_test_q$area)
+```
+
+Fit a model to test if CP ratios can be predicted by primates’ feeding guilds and seasonality (rainy and dry). Include study area as random factor.
+
+Apply backward stepwise model selection (function step, R package lmerTest version 3.1-3) [@kuznetsova2017] to identify the best-fit model for predicting log-transformed CP Ratios.
+
+```{r}
+summary(mod<-lmer(ratio_log ~ guild_overall * season + (1|area), 
+                  data = ratio_item_sc_test_q))
+plotQQunif(mod)
+step(mod)
+
+summary(mod<-lm(ratio_log ~ guild_overall * season, 
+                data = ratio_item_sc_test_q))
+plotQQunif(mod)
+round(confint(mod),3)
+```
+
+Assess the significance of each term in the best-fit model using Type II ANOVA F-tests (function Anova, R package car version 3.1-3) [@car].
+
+Further examine differences between guilds within each season, using  pairwise comparisons of estimated marginal means (function emmeans, R package emmeans version 1.11.0) [@lenth2017], adjusting p-values using the Bonferroni correction to control for multiple testing.
+
+```{r}
+# --- 1. EMMs and pairwise comparisons per season ---
+emm_mod <- emmeans(mod, ~ guild_overall | season)
+
+pairwise_results <- pairs(emm_mod, adjust = "bonferroni") %>%
+  summary() %>%
+  as.data.frame()
+
+### For reporting main effects:
+Anova(mod, type = "II")
+# Main effects
+emm_guild  <- emmeans(mod, ~ guild_overall)
+emm_guild
+emm_season <- emmeans(mod, ~ season)
+emm_season
+# Interaction means (no baseline)
+emm_interaction <- emmeans(mod, ~ guild_overall * season)
+emm_interaction
+
+# --- 2. Prepare p-value labels ---
+sig_pairs <- pairwise_results %>%
+  filter(p.value < 0.05) %>%
+  mutate(
+    group1 = str_extract(contrast, "^[^ ]+"),
+    group2 = str_extract(contrast, "[^ ]+$"),
+    p.label = ifelse(p.value < 0.001,
+                     "p < 0.001",
+                     paste0("p = ", formatC(p.value, format = "f", digits = 3))),
+    season = as.factor(season)
+  )
+
+# --- 3. Compute maximum ratio_log per season for bracket positioning ---
+vertical_spacing <- 0.4  # vertical gap between brackets
+
+max_by_season <- ratio_item_sc_test_q %>%
+  group_by(season) %>%
+  summarise(max_y = max(ratio_log, na.rm = TRUE), .groups = "drop")
+
+sig_pairs <- sig_pairs %>%
+  left_join(max_by_season, by = "season") %>%
+  group_by(season) %>%
+  arrange(group1, group2) %>%
+  mutate(
+    y.position = max_y + 0.05 + vertical_spacing * (row_number() - 1)
+  ) %>%
+  ungroup()
+
+# --- 4. Reorder guild_overall within each season by median ratio_log ---
+ratio_item_sc_test_q <- ratio_item_sc_test_q %>%
+  group_by(season) %>%
+  mutate(guild_overall = fct_reorder(guild_overall, ratio_log, .fun = median)) %>%
+  ungroup()
+
+# --- 5. Plot ---
+mod_cpratio_guildoverall <- ggplot(ratio_item_sc_test_q,
+                                   aes(x = guild_overall, y = ratio_log)) +
+  geom_boxplot(color = "black", outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.4, color = "gray40", size = 2) +
+  stat_pvalue_manual(sig_pairs,
+                     label = "p.label",        # use actual p-value labels
+                     tip.length = 0.01,
+                     hide.ns = TRUE,
+                     bracket.size = 0.5,
+                     size = 5,
+                     step.increase = 0.01) +
+  facet_wrap(~ season, scales = "free_x") +
+  labs(y = "log(Resource-specific CP Ratios)") +
+  theme_bw() +
+  theme(
+    aspect.ratio = 1,
+    panel.grid = element_blank(),
+    axis.text.y = element_text(size = 16, color = "black"),
+    axis.text.x = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 18),
+    axis.title.x = element_blank(),
+    strip.text = element_text(size = 16)
+  )
+```
+
+We found that feeding guilds, seasonality and the interactions between feeding guilds and seasonality significantly affected CP Ratios associated with feeding resources (*p* \< 0.05), @fig-3. Specifically, we found that gummivores exhibited significantly lower Resource-specific CP Ratios than all other feeding guilds in both seasons @fig-3. In contrast, fungivores and faunivores showed the highest proportions of Feeding CPs during the dry season, while folivores and frugivores exhibited the greatest importance of feeding patches for route planning during the rainy season @fig-3. Our backward model selection based on likelihood ratio tests indicated that including study area as a random factor resulted in a singular fit with zero estimated variance and did not improve model performance (ΔAIC = –2.0, LRT *p* = 1.0). Therefore, we excluded area from the final model.
+
+```{r}
+#| label: fig-3
+#| fig-width: 10
+#| fig-height: 6
+#| fig-cap: |
+#|       Pairwise comparisons of log-transformed resource-specific Feeding Change Point Ratios [log(Resource-specific CP Ratios)] across primate feeding guilds and seasons, as predicted by a linear model. Feeding CP Ratios were computed as the number of resource-specific CPs identified for each primate guild divided by the total number of scans associated with feeding behaviors on each kind of food type. Resource-specific CP Ratios were log-transformed to meet model assumptions. Significant pairwise differences after Bonferroni correction are indicated above boxplots.
+#| warning: FALSE
+mod_cpratio_guildoverall
+# Save as high-resolution PNG
+#ggsave(filename = "mod_cpratio_guildoverall.png", plot = mod_cpratio_guildoverall, 
+ #      width = 12, height = 8,
+  #     units = "in", dpi = 600, bg = "white")
+```
+
+## [3. Influence of resource distribution on route planning]{.underline}
+
+Identify all feeding events for each primate species within each study.
+
+We defined a feeding event as the consumption of a specific food item recorded during a scan sampling. We considered a new feeding event if the primate was not observed consuming that food item for at least 30 minutes and moved at least 30m, or if the consumed food item changed between consecutive scans. We then determined the corresponding feeding locations visited by each primate. For this, we defined a feeding location as any site that was not within 30m of another feeding site for the same food item, based on nearest-neighbor distances (function nndist, R package spatstat version 3.3-6) [@spatstat].
+
+Quantify the spatial distribution of food items consumed by each primate species, using Aggregation Indexes (function clarkevans, R package spatstat) for each of the food items consumed by the primates. The Aggregation Indexes value is defined as the ratio of the observed mean nearest-neighbor distance between feeding sites to the expected distance under a random (Poisson) distribution [@clark1954].
+
+```{r}
+#| warning: FALSE
+# Investigate what is the distribution of the feeding items consumed by primates 
+# using clarkevans function.
+# The function also identifies the feeding events
+compute_clarkevans_id_clean <- function(df_id, dist_threshold = 15, max_nn = 1000) {
+  
+  # --- 1. Prepare feeding events ---
+  feeding_events <- df_id %>%
+    filter(!is.na(food_type) & food_type != "unknown") %>%  # remove unknown
+    arrange(date, time) %>%
+    mutate(datetime = ymd_hms(paste(date, time))) %>%
+    filter(group_behav %in% c("folivory","foraging","faunivory","feeding",
+                              "feeding_palm","frugivory","florivory",
+                              "feeding_root","feeding_seed","feeding_bark",
+                              "drink","mycophagy","fruit","gummivory")) %>%
+    group_by(identifier) %>%
+    mutate(
+      time_diff = as.numeric(difftime(datetime, lag(datetime), units = "mins")),
+      coord_change = (lat_interp != lag(lat_interp) | lon_interp != lag(lon_interp)),
+      sl_change = if_else(!is.na(sl) & sl > 30, TRUE, FALSE),
+      new_event = case_when(
+        is.na(time_diff) ~ TRUE,
+        time_diff > 30 ~ TRUE,
+        coord_change ~ TRUE,
+        sl_change ~ TRUE,
+        TRUE ~ FALSE
+      ),
+      feeding_event_id = cumsum(new_event)
+    ) %>%
+    ungroup() %>%
+    group_by(identifier, feeding_event_id) %>%
+    summarise(
+      lat = first(lat_interp),
+      lon = first(lon_interp),
+      food_type = first(food_type),
+      .groups = "drop"
+    )
+  
+  if(nrow(feeding_events) < 2) return(NULL)
+  
+  # --- 2. Convert to sf / UTM ---
+  feeding_sf_utm <- feeding_events %>%
+    st_as_sf(coords = c("lon","lat"), crs = 4326, remove = FALSE) %>%
+    st_transform(crs = 32722)
+  
+  # --- 3. MCP / ppp window ---
+  mcp <- feeding_sf_utm %>%
+    summarise(geometry = st_combine(geometry)) %>%
+    st_convex_hull()
+  mcp_owin <- as.owin(mcp)
+  
+  coords <- st_coordinates(feeding_sf_utm)
+  feeding_ppp <- ppp(
+    x = coords[,1],
+    y = coords[,2],
+    window = mcp_owin,
+    marks = factor(feeding_sf_utm$food_type)
+  )
+  
+  # --- 4. Clark-Evans per food_type ---
+  ce_summary <- levels(feeding_ppp$marks) %>%
+    setNames(., .) %>%
+    lapply(function(mark) {
+      pp_sub <- subset(feeding_ppp, marks == mark)
+      
+      # Remove duplicates
+      dup_mask <- duplicated(pp_sub$x + pp_sub$y*1e6)
+      pp_sub <- pp_sub[!dup_mask]
+      
+      # Remove points with NN < dist_threshold OR NN > max_nn
+      if(pp_sub$n >= 2) {
+        nn_dist <- nndist(pp_sub)
+        pp_sub <- pp_sub[nn_dist >= dist_threshold & nn_dist <= max_nn]
+      }
+      
+      # If too few points remain, return NULL
+      if(pp_sub$n < 2) {
+        tibble(R = NA, cdf = NA, n_points = pp_sub$n, ppp_obj = list(NULL))
+      } else {
+        ce <- clarkevans(pp_sub)
+        tibble(R = ce["naive"], cdf = ce["cdf"], n_points = pp_sub$n, 
+               ppp_obj = list(pp_sub))
+      }
+    }) %>%
+    bind_rows(.id = "food_type") %>%
+    mutate(identifier = unique(df_id$identifier))
+  
+  return(ce_summary)
+}
+
+# --- Apply the function to all identifiers ---
+clarkevans_all <- df_filtered %>%
+  group_by(identifier) %>%
+  group_split() %>%
+  lapply(compute_clarkevans_id_clean) %>%
+  bind_rows()
+
+# --- Print the results ---
+clarkevans_all %>%
+  filter(!is.na(R)) %>%
+  print(n = nrow(.))
+
+
+# Merge Clark-Evans R into ratio_item
+ratio_item <- ratio_item %>%
+  left_join(
+    clarkevans_all %>%
+      filter(!is.na(R)) %>%           # keep only valid R values
+      dplyr::select(identifier, food_type, R),
+    by = c("identifier", "food_type"))
+
+# Check the result
+ratio_item <- ratio_item %>%
+  mutate(season = factor(season, levels = c("dry", "wet")),
+         ratio_log = log(cp_ratio))
+
+kable(head(ratio_item), booktabs = TRUE) %>%
+  kable_styling(font_size = 5,latex_options = "scale_down")
+```
+
+Fit a linear mixed-effects model to test if resource-specific Feeding CP ratios can be predicted by both Aggregation Index (R) and season. Include study area (Identifier) as random factor.
+
+```{r}
+summary(mod_lm <- lmer(ratio_log ~ R * season + (1|identifier), data = ratio_item))
+plotQQunif(mod_lm)
+```
+
+Perform backward stepwise model selection to identify the best-fit model for predicting log-transformed CP Ratios.
+
+```{r}
+step(mod_lm)
+summary(mod_lm <- lm(ratio_log ~ R + season, data = ratio_item))
+round(confint(mod_lm),3)
+```
+
+Prepare the plot
+
+```{r}
+# Predict cp_ratio across R for each season
+preds <- ggpredict(mod_lm, terms = c("R [all]", "season"))
+
+ratio_item$season <- factor(ratio_item$season, levels = c("dry", "wet"))
+preds$group <- factor(preds$group, levels = c("dry", "wet"))
+ratio_clean <- ratio_item %>% filter(!is.na(R), !is.na(ratio_log))
+preds
+
+# Relabel food_types
+ratio_item$food_type <- factor(
+  ratio_item$food_type,
+  levels = c("animal", "fruit", "fungus", "gum", "leaf", "palm heart", "seed"),
+  labels = c("Animal", "Fruit", "Fungus","Gum", "Leaf", "Palm heart", "Seed"))
+
+
+p3 <- ggplot() +
+  geom_line(data = preds, aes(x = x, y = predicted, color = group),
+            linewidth = 1.1) +
+  geom_ribbon(data = preds, aes(x = x, ymin = conf.low, 
+                                ymax = conf.high, fill = group),
+              alpha = 0.2, color = NA) +
+  # Raw data points with food_type colors and season shapes
+  geom_point(data = ratio_item,
+             aes(x = R, y = ratio_log, fill = food_type, shape = season),
+             color = "black", alpha = 0.6, size = 3) +
+  labs(x = "Aggregation Index (R)", y = "log(Resource-specific CP Ratios)", 
+       color = "Season", fill = "Food type") +
+  scale_color_manual(values = c("wet" = "gray25", "dry" = "gray80"),
+                     labels = c("wet" = "Rainy", "dry" = "Dry")) +
+  scale_fill_manual(values = c("Animal" = "#E69F00",
+                               "Fruit" = "#56B4E9",
+                               "Fungus" = "#009E73",
+                               "Gum" = "#F0E442",
+                               "Leaf" = "plum3",
+                               "Palm heart" = "slateblue4",
+                               "Seed" = "#999999")) +
+  scale_shape_manual(values = c("wet" = 21, "dry" = 24),
+                     guide = "none") +
+  guides(color = guide_legend(ncol = 1),
+         fill = guide_legend(ncol = 5, 
+                             override.aes = list(shape = 21, size = 5))) +
+  theme_classic() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio = 1,
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size = 20),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 18),
+        strip.text = element_text(size = 12),
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0))
+
+```
+
+In @fig-4, we can see that Aggregation Index and seasonality significantly influenced log-transformed CP Ratios associated with different kinds of food resources. Resources with more even spatial distributions of feeding patches presented lower influence on route planning, as indicated by lower CP Ratios.
+
+```{r}
+#| label: fig-4
+#| fig-width: 10
+#| fig-height: 6
+#| fig-cap: |
+#|       Relationship between Aggregation Index and log-transformed resource-specific Feeding Change Point Ratios [log(Resource-specific CP Ratios)], as predicted by a linear model, across rainy and dry seasons. Lines and shaded ribbons show model predictions and 95% confidence intervals; points show raw data, colored by food type and shaped by season (rainy: circles, dry: triangles). 
+#| warning: FALSE
+p3
+# Save as high-resolution PNG
+#ggsave(filename = "model_ratio_R.png", plot = p3, width = 12, height = 8,  
+ #     units = "in", dpi = 600, bg = "white")
+```
+
+## [4. Daily route linearity across feeding guilds]{.underline}
+
+Calculate Linearity Indexes -\> Euclidean distance/total daily distance traveled (i.e., daily path length—DPL).
+
+To explore the linearity of foraging routes, we will first identify all the locations of feeding events on the daily routes. Then, we will compute linearity indexes for each visit to feeding patches. Linearity indexes will correspond to the ratio between the distance traveled between successive feeding patches and the Euclidean distance among them.
+
+```{r}
+#| warning: FALSE
+dat <- df_filtered
+sf_data <- dat %>%
+  st_as_sf(coords = c("lon_interp", "lat_interp"), crs = 4326, 
+           remove = FALSE) %>% 
+  mutate(t1_ = as.POSIXct(paste(date, time), 
+                          format = "%d/%m/%y %H:%M:%S")) %>% 
+  dplyr::select(primate_species, sampling_interval, season, date, time, 
+                lon_interp, lat_interp, group_behav, cp, identifier, t1_,
+                study_locality) %>%
+  mutate(cp = replace_na(cp, "NO-CP"),
+         row_id = row_number())
+sf_data <- sf_data %>%
+  mutate(
+    t1_ = case_when(
+      identifier == "Sapajus cucullatus_Presotto" & year(t1_) == 2007 ~ 
+        update(t1_, year = 2107),
+      identifier == "Callithrix flaviceps_Hilario" & year(t1_) == 2008 ~ 
+        update(t1_, year = 2108),
+      identifier == "Brachyteles hypoxanthus_Lima" & year(t1_) == 2010 ~ 
+        update(t1_, year = 2110),
+      identifier == "Brachyteles hypoxanthus_Lima" & year(t1_) == 2011 ~ 
+        update(t1_, year = 2111),
+      identifier == "Sapajus xanthosternos_Suscke" & year(t1_) == 2011 ~ 
+        update(t1_, year = 2211),
+      identifier == "Plecturocebus cupreus_Dolotovskaya" & year(t1_) == 2017 ~ 
+        update(t1_, year = 2117),
+      identifier == "Plecturocebus cupreus_Dolotovskaya" & year(t1_) == 2018 ~ 
+        update(t1_, year = 2118),
+      identifier == "Leontopithecus chrysopygus_Breziski" & year(t1_) == 2023 ~ 
+        update(t1_, year = 2123),
+      identifier == "Sapajus cucullatus_Kaisin" & year(t1_) == 2024 ~ 
+        update(t1_, year = 2124),
+      TRUE ~ t1_  # keep all other dates unchanged
+    )
+  )
+
+duplicates <- sf_data %>%
+  group_by(t1_) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+# See which rows have these duplicated times
+duplicates
+
+head(sf_data)
+
+sf_data <- sf_data %>%
+  mutate(
+    utm_zone = floor((lon_interp + 180) / 6) + 1,
+    hemisphere = if_else(lat_interp >= 0, "N", "S"),
+    epsg = if_else(
+      hemisphere == "N",
+      paste0("EPSG:326", sprintf("%02d", utm_zone)),  # N hemisphere
+      paste0("EPSG:327", sprintf("%02d", utm_zone))   # S hemisphere
+    )
+  )
+
+sf_utm_list <- sf_data %>%
+  group_split(epsg) %>%
+  lapply(function(df_zone) {
+    df_zone <- df_zone %>%
+      mutate(row_id = row_number())
+    st_transform(df_zone, unique(df_zone$epsg))
+  })
+
+tracks_list <- lapply(sf_utm_list, function(df_zone) {
+  df_zone <- df_zone %>%
+    mutate(row_id = row_number(),               # create row_id
+           x_utm = st_coordinates(.)[,1],
+           y_utm = st_coordinates(.)[,2],
+           ts = as.POSIXct(paste(date, time), format = "%d/%m/%y %H:%M:%S")) %>%
+    st_drop_geometry()
+  
+  make_track(df_zone, x_utm, y_utm, t1_, id = identifier,
+             behavior = group_behav, season = season, row_id = row_id,
+             crs = 4326) %>%
+    steps() %>%
+    mutate(row_id = row_number() + 1)
+})
+
+# Include back info into tracks_list
+tracks_list_full <- Map(function(tracks_df, sf_df) {
+  # Select only the columns you want from sf_df
+  sf_select <- sf_df %>%
+    st_set_geometry(NULL) %>%        # drop geometry for joining
+    dplyr::select(t1_, identifier, primate_species, season, group_behav, cp,
+                  study_locality)
+  
+  # Join by t1_
+  tracks_df %>%
+    left_join(sf_select, by = "t1_")
+}, tracks_list, sf_utm_list)
+
+# Combine all tracks into a single tibble
+tracks_all <- bind_rows(tracks_list_full)
+
+# Convert back the years
+tracks_all <- tracks_all %>%
+  mutate(
+    t1_ = case_when(
+      identifier == "Sapajus cucullatus_Presotto" & year(t1_) == 2107 ~ 
+        update(t1_, year = 2007),
+      identifier == "Callithrix flaviceps_Hilario" & year(t1_) == 2108 ~ 
+        update(t1_, year = 2008),
+      identifier == "Brachyteles hypoxanthus_Lima" & year(t1_) == 2110 ~ 
+        update(t1_, year = 2010),
+      identifier == "Brachyteles hypoxanthus_Lima" & year(t1_) == 2111 ~ 
+        update(t1_, year = 2011),
+      identifier == "Sapajus xanthosternos_Suscke" & year(t1_) == 2211 ~ 
+        update(t1_, year = 2011),
+      identifier == "Plecturocebus cupreus_Dolotovskaya" & year(t1_) == 2117 ~ 
+        update(t1_, year = 2017),
+      identifier == "Plecturocebus cupreus_Dolotovskaya" & year(t1_) == 2118 ~ 
+        update(t1_, year = 2018),
+      identifier == "Leontopithecus chrysopygus_Breziski" & year(t1_) == 2123 ~ 
+        update(t1_, year = 2023),
+      identifier == "Sapajus cucullatus_Kaisin" & year(t1_) == 2124 ~ 
+        update(t1_, year = 2024),
+      TRUE ~ t1_
+    ),
+    t2_ = case_when(
+      identifier == "Sapajus cucullatus_Presotto" & year(t2_) == 2107 ~ 
+        update(t2_, year = 2007),
+      identifier == "Callithrix flaviceps_Hilario" & year(t2_) == 2108 ~ 
+        update(t2_, year = 2008),
+      identifier == "Brachyteles hypoxanthus_Lima" & year(t2_) == 2110 ~ 
+        update(t2_, year = 2010),
+      identifier == "Brachyteles hypoxanthus_Lima" & year(t2_) == 2111 ~ 
+        update(t2_, year = 2011),
+      identifier == "Sapajus xanthosternos_Suscke" & year(t2_) == 2211 ~ 
+        update(t2_, year = 2011),
+      identifier == "Plecturocebus cupreus_Dolotovskaya" & year(t2_) == 2117 ~ 
+        update(t2_, year = 2017),
+      identifier == "Plecturocebus cupreus_Dolotovskaya" & year(t2_) == 2118 ~ 
+        update(t2_, year = 2018),
+      identifier == "Leontopithecus chrysopygus_Breziski" & year(t2_) == 2123 ~ 
+        update(t2_, year = 2023),
+      identifier == "Sapajus cucullatus_Kaisin" & year(t2_) == 2124 ~ 
+        update(t2_, year = 2024),
+      TRUE ~ t2_
+    )
+  )
+
+# Include guild information into tracks_all
+guild_df <- read.csv("2_food_items_comsumption_rates_2025_09_d18.csv") %>% 
+  mutate(identifier = paste0(primate_species, "_", sub("^(.*?),.*$", "\\1", 
+                                                       researcher))) %>% 
+  dplyr::select(identifier, season, principal_item_researchers, contribution_1, 
+                second_item_researchers, contribution_2)
+
+guild_df <- guild_df %>%
+  mutate(
+    guild = case_when(
+      !is.na(second_item_researchers) & second_item_researchers != "" & 
+        contribution_1 >= 20 & contribution_2 >= 20 ~ 
+        paste(principal_item_researchers, second_item_researchers, sep = "/"),
+      contribution_1 >= 20 & (is.na(second_item_researchers) | 
+                                second_item_researchers == "" | 
+                                contribution_2 < 20) ~ 
+        principal_item_researchers,
+      contribution_1 < 20 & !is.na(second_item_researchers) & 
+        second_item_researchers != "" & contribution_2 >= 20 ~ 
+        second_item_researchers,
+      TRUE ~ NA_character_))
+guild_df <- guild_df %>%
+  # make sure the rows are ordered by identifier and season
+  arrange(identifier, season) %>%
+  group_by(identifier) %>%
+  # fill NA values with the other season's value
+  mutate(guild = if_else(is.na(guild), guild[!is.na(guild)], guild)) %>%
+  ungroup()
+
+# Also compute the general guild (find the most important item 
+# regardless of season)
+guild_all <- guild_df %>%
+  group_by(identifier, season) %>%
+  summarise(
+    # Keep only the item with the highest contribution_1
+    principal_item_researchers = principal_item_researchers[
+      which.max(contribution_1)],
+    contribution_1 = max(contribution_1, na.rm = TRUE),
+    .groups = "drop") %>%
+  mutate(
+    # Set guild_overall equal to the principal item
+    guild_overall = principal_item_researchers)
+
+guild_df <- guild_df %>%
+  left_join(guild_all %>% dplyr::select(identifier, guild_overall, season),
+            by = c("identifier", "season"))
+
+tracks_all <- tracks_all %>%
+  left_join(guild_df %>%
+              dplyr::select(identifier, season, guild, guild_overall) %>%
+              distinct(),
+            by = c("identifier", "season"))
+
+tr_test <- tracks_all %>% 
+  filter(identifier == "Sapajus cucullatus_Kaisin",
+         !is.na(ta_), sl_ > 0)
+
+ggplot(tr_test[tr_test$season == "dry",], aes(x = ta_)) +
+  geom_histogram(aes(y = after_stat(density)), 
+                 binwidth = (2 * pi) / 20, 
+                 fill = "grey35", 
+                 color = "black") +
+  coord_polar(start = 0) +
+  theme_minimal() +
+  labs(y = "Density", title = "Angles Direct") +
+  scale_x_continuous(limits = c(-pi, pi), 
+                     breaks = c(-pi, -pi/2, 0, pi/2, pi), 
+                     labels = c("-pi", "-pi/2", "0", "pi/2", "pi"))
+
+tr_test$circular <- circular(tr_test$ta_, units = "radians")
+dry <- tr_test[tr_test$season == "dry",]
+wet <- tr_test[tr_test$season == "wet",]
+
+
+tr_test$circ_ta <- circular(tr_test$ta_, units = "radians")
+t1 <- replicate(100,watson.wheeler.test(
+  tr_test$circ_ta, tr_test$season)$p.value)
+which(t1 < 0.005)
+
+
+daily_linearity <- tracks_all %>%
+  filter(sl_ > 0) %>%
+  group_by(guild_overall, season, date = as.Date(t1_), 
+           study_locality) %>%
+  summarise(total_path = sum(sl_),
+            net_disp = sqrt((last(x2_) - first(x1_))^2 + 
+                              (last(y2_) - first(y1_))^2),
+            R = net_disp / total_path) %>% 
+  filter(R < 675.33850)
+
+# Relabel factor levels
+daily_linearity$guild_overall <- factor(
+  daily_linearity$guild_overall,
+  levels = c("gum", "animal", "fruit", "leaf", "fungus"),
+  labels = c("Gummivores", "Faunivores", "Frugivores", 
+             "Folivores", "Fungivores"))
+
+
+daily_linearity$guild_overall <- as.factor(daily_linearity$guild_overall) 
+daily_linearity$season <- as.factor(daily_linearity$season)
+daily_linearity$study_locality <- as.factor(daily_linearity$study_locality)
+```
+
+Then, we will test if Daily Linearity Index can be predicted by feeding guild and season, including study area as a random factor, using a Linear Mixed-Effects Model. Power-transformed the response variable using a Box-Cox transformation in R package MASS v7.3-61 [@venables2002] to satisfy normality assumptions. Use backward stepwise selection to identify the best-fitting model. Finally, conduct pairwise comparisons of estimated marginal means within each season and applied a Bonferroni correction to adjust for multiple testing.
+
+```{r}
+#| warning: FALSE
+boxcox(R+.0001 ~ guild_overall, data = daily_linearity)
+boxcox(R+.0001 ~ guild_overall, data = daily_linearity, 
+       lambda = seq(0, .5, 0.1))
+
+summary(lm_daily_linearity_guild <- lmer((R + 0.0001)^0.4 ~ guild_overall * season + (1|study_locality), 
+                                       data = daily_linearity))
+plotQQunif(lm_daily_linearity_guild)
+step(lm_daily_linearity_guild)
+
+summary(lm_daily_linearity_guild <- lmer((R + 0.0001)^0.4 ~ guild_overall + (1|study_locality), 
+                                       data = daily_linearity))
+plotQQunif(lm_daily_linearity_guild)
+round(confint(lm_daily_linearity_guild),3)
+```
+
+Perform pairwise comparisons and prepare the plot
+
+```{r}
+#| warning: FALSE
+# Estimated marginal means and pairwise comparisons
+emm_guild <- emmeans(lm_daily_linearity_guild, ~ guild_overall)
+
+pairwise_results <- pairs(emm_guild, adjust = "none") %>%
+  summary() %>%
+  as.data.frame()
+
+# Build significance table
+sig_pairs <- pairwise_results %>%
+  dplyr::filter(p.value < 0.05) %>%
+  dplyr::mutate(
+    group1 = str_extract(contrast, "^[^ ]+"),
+    group2 = str_extract(contrast, "[^ ]+$"),
+    # create a new column with p-value labels
+    p.adj.label = case_when(
+      p.value < 0.001 ~ "p < 0.001",
+      TRUE ~ paste0("p = ", format(round(p.value, 3), nsmall = 3))))
+
+# Define y positions slightly above boxplot maxima per guild
+ymax_by_group <- daily_linearity %>%
+  group_by(guild_overall) %>%
+  summarize(ymax = max((R + 0.0001)^0.4, na.rm = TRUE))
+
+sig_pairs <- sig_pairs %>%
+  left_join(ymax_by_group, by = c("group1" = "guild_overall")) %>%
+  mutate(y.position = ymax + seq(0.02, 0.02 * n(), by = 0.02))
+
+# Boxplot with significance brackets
+daily_Linearity_guild <- ggplot(daily_linearity,
+                                    aes(x = reorder(guild_overall, R, median),
+                                        y = (R + 0.0001)^0.4)) +
+  geom_boxplot(color = "black", outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.4, color = "gray40", size = 2) +
+  stat_pvalue_manual(sig_pairs, label = "p.adj.label", tip.length = 0.01,
+                     hide.ns = TRUE, bracket.size = 0.5, size = 5,
+                     step.increase = 0.04) +
+  labs(x = "Feeding Guild", 
+       y = expression("(Daily Linearity Index + 0.0001)"^0.4)) +
+  theme_classic() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio = 1,
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_blank())
+```
+
+Overall, folivores exhibited the most linear daily routes, followed by fungivores, while gummivores displayed the least linearity among the primate guilds evaluated. Pairwise comparisons indicated that the daily linearity of folivores was significantly higher than that of frugivores and gummivores @fig-5. Stepwise model selection showed that including seasonality did not improve model fit, as the interaction between feeding guild and season and the main effect of season were not significant.
+
+```{r}
+#| label: fig-5
+#| fig-width: 10
+#| fig-height: 6
+#| fig-cap: |
+#|       Daily Linearity Index according to primate feeding guilds, as predicted by a Linear Mixed-Effects Model. Daily Linearity Index was calculated as the ratio between the straight-line distance between the starting and ending locations for each day and the total path length traveled per day. Linearity Index transformed as (Daily Linearity Index + 0.0001)^0.4 to meet model assumptions. Significant pairwise differences after Bonferroni correction are shown above boxplots.  
+#| warning: FALSE
+daily_Linearity_guild
+# Save as high-resolution PNG
+#ggsave(filename = "Daily_Linearity_guild.png", plot = daily_Linearity_guild, 
+ #     width = 12, height = 8,
+  #    units = "in", dpi = 600, bg = "white")
+```
+
+## [5. Assessing feeding guilds through movement]{.underline}
+
+To evaluate whether primate feeding guilds could be differentiated based on their ranging characteristics and route-planning strategies, we conducted a Principal Component Analysis (PCA; function prcomp, base R) using standardized values of Feeding CP Ratios, mean Feeding Linearity Index, and mean Daily Route Linearity Index as input variables. We performed the PCA on the full dataset to ensure consistent axis interpretation across seasons.
+
+Mean Feeding Linearity Index -\> average( straight-line distance between consecutive feeding events/ distance traveled by primates to reach those resources.
+
+```{r}
+# Compute Feeding Linearity Index
+feeding_behaviors <- c("folivory", "foraging", "faunivory", "feeding", 
+                       "feeding_palm", "frugivory", "florivory", 
+                       "feeding_root", "feeding_seed",
+                       "feeding_bark", "drink", "mycophagy", 
+                       "fruit", "gummivory")
+
+df_with_events <- df_filtered %>%
+  mutate(datetime = dmy_hms(paste(date, time))) %>%
+  arrange(identifier, datetime) %>%
+  group_by(identifier) %>%
+  mutate(
+    # --- feeding indicator ---
+    is_feeding = group_behav %in% feeding_behaviors,
+    
+    # --- last feeding behavior carried forward ---
+    last_feeding_behavior = if_else(lag(is_feeding), 
+                                    lag(group_behav), NA_character_),
+    last_feeding_behavior = na.locf(last_feeding_behavior, na.rm = FALSE),
+    
+    # --- temporal, spatial, and step length changes ---
+    time_diff = if_else(is_feeding, as.numeric(difftime(datetime, 
+                                                        lag(datetime), 
+                                                        units = "mins")), 
+                        NA_real_),
+    coord_change = if_else(is_feeding, (lat_interp != lag(lat_interp) | 
+                                          lon_interp != lag(lon_interp)), 
+                           FALSE),
+    sl_change = if_else(is_feeding & !is.na(sl) & sl > 20, TRUE, FALSE),
+    
+    # --- feeding behavior change ---
+    feeding_behavior_change = is_feeding & !is.na(last_feeding_behavior) & 
+      group_behav != last_feeding_behavior,
+    
+    # --- new feeding event ---
+    new_event = case_when(
+      !is_feeding ~ NA,
+      is.na(time_diff) ~ TRUE,
+      time_diff > 30 ~ TRUE,
+      coord_change ~ TRUE,
+      sl_change ~ TRUE,
+      feeding_behavior_change ~ TRUE,
+      TRUE ~ FALSE
+    ),
+    
+    # --- feeding event id ---
+    feeding_event_id = if_else(is_feeding, cumsum(replace_na(new_event, 
+                                                             FALSE)), 
+                               NA_integer_)) %>%
+  ungroup() %>%
+  dplyr::select(-is_feeding, -last_feeding_behavior, -time_diff, 
+                -coord_change, -sl_change, -feeding_behavior_change, 
+                -new_event) %>%
+  group_by(date) %>%
+  arrange(datetime) %>%
+  mutate(
+    # cumulative step length
+    cum_sl = cumsum(replace_na(sl, 0)),
+    # check if current feeding_event_id is same as 1 or 2 rows back
+    same_id = as.integer(feeding_event_id == lag(feeding_event_id, 1) | 
+                           feeding_event_id == lag(feeding_event_id, 2)),
+    same_id = replace_na(same_id, 0),
+    # is_rest indicator
+    is_rest = as.integer(group_behav %in% c("resting", "social_aff", 
+                                            "social_affiliative")),
+    # cum_sl_event
+    cum_sl_event = if_else((!is.na(feeding_event_id) & same_id == 0) | 
+                             is_rest == 1, cum_sl, NA_real_)) %>%
+  ungroup()
+
+df_with_events <- df_with_events %>%
+  group_by(date) %>%
+  arrange(datetime) %>%
+  mutate(
+    # --- dist_t: cumulative difference for rows with cum_sl_event ---
+    dist_t = {
+      idx <- which(!is.na(cum_sl_event))
+      tmp <- rep(NA_real_, n())
+      if(length(idx) > 0) tmp[idx] <- c(cum_sl_event[idx][1], 
+                                        diff(cum_sl_event[idx]))
+      tmp
+    },
+    
+    # --- compute indicator: first row, resting, or feeding event ---
+    compute = as.integer(is_rest == 1 | !is.na(feeding_event_id) | 
+                           row_number() == 1L),
+    
+    # --- previous coordinates for distance calculation ---
+    lat_prev = if_else(compute == 1, lag(lat_interp[compute == 1])[cumsum(
+      compute == 1)], NA_real_),
+    lon_prev = if_else(compute == 1, lag(lon_interp[compute == 1])[cumsum(
+      compute == 1)], NA_real_),
+    
+    # --- Euclidean distance assigned to endpoint row ---
+    dist_euclidean = if_else(compute == 1 & !is.na(lat_prev),
+                             distHaversine(cbind(lon_prev, lat_prev),
+                                           cbind(lon_interp, lat_interp)),
+                             NA_real_),
+    
+    # --- keep distances only for feeding events ---
+    dist_t = if_else(!is.na(feeding_event_id), dist_t, NA_real_),
+    dist_euclidean = if_else(!is.na(feeding_event_id), dist_euclidean, 
+                             NA_real_),
+    
+    # --- cap Euclidean distance and compute linearity safely ---
+    dist_euclidean = pmin(dist_euclidean, dist_t, na.rm = TRUE),
+    linearity = if_else(!is.na(dist_t) & !is.na(dist_euclidean) & 
+                          dist_euclidean != 0,
+                        dist_euclidean / dist_t,
+                        NA_real_)) %>%
+  ungroup() %>%
+  dplyr::select(-compute, -lat_prev, -lon_prev)
+
+print(df_with_events[,c(43, 46, 27, 47:48, 52:54)], n = 10)
+```
+
+We standardized continuous variables using the function scale in base R to improve comparability and avoid scale-driven bias [@schielzeth2010].
+
+Conduct a Permutational Multivariate Analysis of Variance (PERMANOVA; function adonis2, R package vegan version 2.7-2) [@oksanen2001] based on Euclidean distances to assess whether foraging, ranging, and route-planning patterns differed significantly among feeding guilds within each season.
+
+Perform k-means clustering (function kmeans, base R) on the first two principal component scores of each season separately. We determined the optimal number of clusters using mean silhouette width (function silhouette, R package cluster version 2.1.8.1) [@cluster].
+
+```{r}
+#| warning: FALSE
+ratio_item_filtered <- ratio_item %>%
+  filter(food_type %in% c("Animal", "Fruit", "Leaf", "Gum"))
+
+ratio_item_filtered$food_type <- factor(
+  ratio_item_filtered$food_type,
+  levels = c("Fruit", "Leaf", "Animal", "Gum"))
+head(ratio_item_filtered)
+
+## Compute linearity indexes for each resource 
+linearity_summary <- df_with_events %>%
+  group_by(identifier, season, food_type) %>%
+  summarise(mean_linearity = mean(linearity, na.rm = TRUE),
+            sd_linearity = sd(linearity, na.rm = TRUE),
+            n = n()) %>%
+  ungroup() %>% 
+  mutate(food_type = str_to_title(food_type))
+
+ratio_item_filtered <- ratio_item_filtered %>%
+  left_join(linearity_summary %>%
+              dplyr::select(identifier, season, food_type, 
+                            mean_linearity, sd_linearity),
+            by = c("identifier", "season", "food_type"))
+
+# Perform the PCA
+daily_linearity <- tracks_all %>%
+  filter(sl_ > 0) %>%
+  group_by(identifier, guild_overall, season, date = as.Date(t1_)) %>%
+  summarise(total_path = sum(sl_),
+            net_disp = sqrt((last(x2_) - first(x1_))^2 + 
+                              (last(y2_) - first(y1_))^2),
+            d_lin = net_disp / total_path) %>% 
+  filter(d_lin < 675.33850)
+
+daily_linearity_summary <- daily_linearity %>%
+  group_by(identifier) %>%
+  summarise(
+    n_days = n(),
+    mean_dpl = mean(total_path, na.rm = TRUE),
+    sd_dpl = sd(total_path, na.rm = TRUE),
+    mean_d_lin = mean(d_lin, na.rm = TRUE),
+    sd_d_lin = sd(d_lin, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(mean_d_lin_sc = as.numeric(scale(mean_d_lin)),
+         mean_dpl_sc = as.numeric(scale(mean_dpl))) %>% 
+  arrange(desc(mean_d_lin_sc))
+
+ratio_item_sc <- ratio_item_filtered %>%
+  mutate(across(c(cp_ratio, R, ratio_log, mean_linearity),
+                ~ scale(.)[, 1],                  # z-score scaling
+                .names = "{.col}_sc")) %>%
+  dplyr::select(identifier, season, food_type, cp_count, total_scan, 
+                sampling_interval, ends_with("_sc"), sd_linearity)
+
+ratio_item_sc <- ratio_item_sc %>%
+  left_join(guild_df %>% dplyr::select(identifier, season, guild, 
+                                       guild_overall),
+            by = c("identifier", "season"))
+
+ratio_item_sc <- ratio_item_sc %>%
+  left_join(daily_linearity_summary %>% dplyr::select(identifier, 
+                                                      mean_d_lin_sc,
+                                                      mean_dpl_sc),
+            by = c("identifier"))
+
+# Aggregate predictors per identifier per season
+ratio_item_agg <- ratio_item_sc %>%
+  group_by(identifier, season, guild_overall) %>%
+  summarise(
+    cp_ratio_sc = mean(cp_ratio_sc, na.rm = TRUE),
+    R_sc = mean(R_sc, na.rm = TRUE),
+    mean_linearity_sc = mean(mean_linearity_sc, na.rm = TRUE),
+    mean_d_lin_sc = mean_d_lin_sc,
+    mean_dpl_sc = mean_dpl_sc,
+    .groups = "drop")
+
+ratio_item_agg <- unique(ratio_item_agg)
+ratio_item_agg$season <- factor(ratio_item_agg$season, 
+                                levels = c("wet", "dry"))
+
+# Loop through seasons
+for(s in unique(ratio_item_agg$season)) {
+  cat("\nSeason:", s, "\n")
+  
+  data_season <- ratio_item_agg %>%
+    filter(season == s) %>%
+    dplyr::select(cp_ratio_sc,  mean_d_lin_sc, mean_linearity_sc)
+  
+  guild_season <- ratio_item_agg %>%
+    filter(season == s) %>%
+    pull(guild_overall)
+  
+  # Compute Euclidean distance and run PERMANOVA
+  adonis_res <- adonis2(data_season ~ guild_season, method = "euclidean")
+  print(adonis_res)
+}
+
+# Interpretation
+# Wet season: R² = 0.632, p = 0.076 → guilds explain ~63% of the 
+# variation in the predictors, but this is marginally 
+# non-significant at 0.05. Dry season: R² = 0.401, p = 0.73 → guilds 
+# explain ~40% of the variation, but there is no significant separation.
+
+# This suggests that guilds are more distinguishable in the wet 
+# season based on cp_ratio_sc, R_sc, and mean_linearity_sc.
+
+# Run PCA on all data to keep axes comparable
+pca_res <- prcomp(ratio_item_agg[, c("cp_ratio_sc",  "mean_linearity_sc",  
+                                     "mean_d_lin_sc")], 
+                  scale. = TRUE)#"R_sc", "mean_dpl_sc"
+all_scores <- as.data.frame(pca_res$x[,1:2])
+all_scores$guild_overall <- ratio_item_agg$guild_overall
+all_scores$identifier <- ratio_item_agg$identifier
+all_scores$season <- ratio_item_agg$season
+
+# Define axis limits (same for all seasons)
+xlim <- range(all_scores$PC1)
+ylim <- range(all_scores$PC2)
+
+# Shapes for clusters (non-fillable)
+shape_values <- c(22, 23, 25)  # solid and simple shapes
+
+# Map season to nicer labels
+all_scores$season <- factor(all_scores$season,
+                            levels = c("wet", "dry"),
+                            labels = c("Rainy", "Dry"))
+
+all_scores$guild_overall <- factor(all_scores$guild_overall,
+                            levels = c("fruit", "leaf", "fungus", 
+                                       "gum", "animal"),
+                            labels = c("Frugivores", "Folivores", 
+                                       "Fungivore", "Gummivore", 
+                                       "Faunivore"))
+
+guild_colors <- c("Faunivore" = "#E69F00", "Frugivores" = "#56B4E9",  
+                  "Fungivore" = "#009E73", "Gummivore" = "#F0E442",
+                  "Folivores" = "plum3")
+
+# Loop through seasons
+for (s in unique(all_scores$season)) {
+  
+  cat("\nSeason:", s, "\n")
+  
+  scores <- all_scores %>% filter(season == s)
+  
+  # Compute silhouette to determine optimal k
+  sil_width <- c()
+  for (k in 2:6) {
+    km <- kmeans(scores[, 1:2], centers = k, nstart = 25)
+    ss <- silhouette(km$cluster, dist(scores[, 1:2]))
+    sil_width[k] <- mean(ss[, 3])
+  }
+  k_opt <- which.max(sil_width)
+  cat("Suggested number of clusters (silhouette):", k_opt, "\n")
+  
+  # K-means with optimal k
+  km_opt <- kmeans(scores[, 1:2], centers = k_opt, nstart = 25)
+  scores$cluster <- factor(km_opt$cluster)
+  
+  # Create plot
+  p <- ggplot(scores, aes(x = PC1, y = PC2)) +
+    geom_point(aes(fill = guild_overall, shape = cluster, alpha = .6),
+               size = 4, color = "black", stroke = 0.5, show.legend = TRUE) +
+    geom_text_repel(aes(label = identifier),
+                    fontface = "italic", size = 3,
+                    box.padding = 0.35, point.padding = 0.5,
+                    segment.color = "grey50", max.overlaps = Inf) +
+    scale_shape_manual(values = shape_values[1:length(unique(scores$cluster))]) +
+    scale_fill_manual(values = guild_colors, drop = TRUE) +
+    guides(fill = guide_legend(title = "Feeding guilds", ncol = 3,
+                               override.aes = list(shape = 21, size = 5)),
+           shape = guide_legend(title = "Clusters", ncol = 3)) +
+    scale_x_continuous(limits = xlim) +
+    scale_y_continuous(limits = ylim) +
+    theme_bw() +
+    labs(title = paste("PCA - Season:", s), x = "PC1", y = "PC2",
+         fill = "Guild", shape = "Cluster") +
+    theme(panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          aspect.ratio = 1,
+          axis.text.y = element_text(size = 18, color = "black"),
+          axis.text.x = element_text(size = 18, color = "black"),
+          axis.title.y = element_text(size = 20),
+          axis.title.x = element_text(size = 20),
+          legend.position = "bottom",
+          legend.title = element_blank(),
+          legend.text = element_text(size = 20),
+          strip.text = element_text(size = 8, face = "bold"),
+          legend.margin = margin(t = -20, r = 0, b = 0, l = 0),
+          legend.title.align = 0.5,
+          plot.title = element_text(size = 20))
+   
+  
+  # Export PNG
+  #ggsave(filename = paste0("PCA_Season_", s, ".png"), plot = p,
+   #      width = 10, height = 8, dpi = 900)
+  
+  #print(p)
+}
+
+plots_list <- list()
+
+# --- Define consistent colors for clusters across seasons ---
+# Adjust as needed; number should cover the max k value observed
+cluster_colors <- c("1" = "indianred3",  # red
+                    "2" = "royalblue4",  # blue
+                    "3" = "seagreen4")  # green
+                    
+for (s in unique(all_scores$season)) {
+  
+  cat("\nSeason:", s, "\n")
+  
+  scores <- all_scores %>% filter(season == s)
+  
+  # --- Silhouette analysis for optimal k ---
+  sil_width <- c()
+  for (k in 2:6) {
+    km <- kmeans(scores[, 1:2], centers = k, nstart = 25)
+    ss <- silhouette(km$cluster, dist(scores[, 1:2]))
+    sil_width[k] <- mean(ss[, 3])
+  }
+  k_opt <- which.max(sil_width)
+  cat("Suggested number of clusters (silhouette):", k_opt, "\n")
+  
+  # --- K-means with optimal k ---
+  km_opt <- kmeans(scores[, 1:2], centers = k_opt, nstart = 25)
+  scores$cluster <- factor(km_opt$cluster)
+  
+  # --- PCA plot for this season ---
+  p <- ggplot(scores, aes(x = PC1, y = PC2)) +
+    # Ellipses for clusters — colored borders, no fill
+    ggforce::geom_mark_ellipse(aes(group = cluster, color = cluster),
+                               fill = NA, linewidth = 1, linetype = 2,
+                               expand = unit(3, "mm"), 
+                               show.legend = FALSE) +
+    geom_point(aes(fill = guild_overall, shape = cluster),
+               size = 4, color = "black", stroke = 0.5, alpha = .6) +
+    geom_text_repel(aes(label = identifier),
+                    fontface = "italic", size = 3,
+                    box.padding = 0.35, point.padding = 0.5,
+                    segment.color = "grey50", max.overlaps = Inf) +
+    guides(fill = guide_legend(title = "Feeding guilds", ncol = 3,
+                               override.aes = list(shape = 21, size = 5)),
+           shape = guide_legend(title = "Clusters", ncol = 3)) +
+    # --- Consistent scales for cluster color and shape ---
+    scale_shape_manual(values = shape_values[1:length(unique(scores$cluster))]) +
+    scale_color_manual(values = cluster_colors, drop = FALSE) +
+    scale_fill_manual(values = guild_colors, drop = TRUE) +
+    scale_x_continuous(limits = xlim) +
+    scale_y_continuous(limits = ylim) +
+    labs(title = paste("Season:", s), x = "PC1", y = "PC2") +
+    theme_bw(base_size = 18) +
+    theme(panel.grid = element_blank(),
+          aspect.ratio = 1,
+          legend.position = "bottom",
+          legend.title = element_text(size = 16),
+          legend.title.align = 0.5,
+          legend.text = element_text(size = 16),
+          plot.title = element_text(size = 20, hjust = 0.5))
+  
+  plots_list[[s]] <- p
+}
+
+# --- Combine both plots with a unified legend ---
+combined_plot <- wrap_plots(plots_list, ncol = 2, guides = "collect") &
+  theme(legend.position = "bottom",
+        legend.title = element_text(size = 16, hjust = 0.5),
+        legend.text = element_text(size = 16))
+```
+
+The Principal Component Analysis (PCA) conducted on standardized Feeding CP Ratios, mean Feeding Linearity Index, and mean Daily Linearity Index revealed consistent multivariate patterns across seasons.  The first two principal components explained 72.8% of the total variance (PC1 = 46.2%, PC2 = 26.6%). PC1 primarily captured a contrast between higher Feeding CP Ratios and higher mean Daily Linearity Indexes (positive loadings) versus lower values of Feeding Linearity Index (negative loading), representing a gradient from highly linear daily paths—where feeding patches contributed more strongly to route planning—to more tortuous movements within feeding areas. PC2 was mainly associated with both mean Daily and Feeding Linearity Indexes, distinguishing species according to the consistency of their movement patterns across spatial scales @fig-6.
+
+K-means clustering of PCA scores revealed two main clusters during the rainy season, indicating a clear separation in route planning and movement patterns between folivores and the other feeding guilds @fig-6. In the dry season, three clusters were identified, but no distinct grouping by feeding guild emerged based on the movement parameters analyzed. Consistent with these patterns, PERMANOVA results indicated no significant differences among feeding guilds in the dry season, whereas in the rainy season, guilds differed significantly in multivariate space (Pseudo-F = 4.22, p = 0.035, R² = 0.584).
+
+```{r}
+#| label: fig-6
+#| fig-width: 10
+#| fig-height: 6
+#| fig-cap: |
+#|       Seasonal clustering of species based on a Principal Component Analysis (PCA). PCA plots of species scores for the dry and rainy seasons. Points represent species and study, colored according to their feeding guilds and shaped according to k-means clusters identified from the first two principal components. Dashed ellipses outline the spatial extent of each cluster in the PCA space. The optimal number of clusters for each season was determined using the silhouette criterion (3 clusters in the dry season; 2 clusters in the rainy season). Axes represent PC1 and PC2 scores summarizing multivariate feeding guilds. PC1 primarily captured a contrast between higher CP ratios and higher mean daily linearity indexes (positive loadings) versus lower feeding linearity index values (negative loadings), while PC2 was mainly associated with both mean daily and feeding linearity indexes.  
+#| warning: FALSE
+combined_plot
+# Save as high-resolution PNG
+# ggsave("PCA_combined_seasons.png", combined_plot, width = 14, 
+# height = 7, dpi = 900)
+```
+
+## References
