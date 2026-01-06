@@ -1,0 +1,2808 @@
+---
+title: "Predicting landscapes from field data"
+format: pdf
+editor: visual
+authors: 
+  - name: Felipe Bufalo
+  - name: Rodrigo Gonçalves Amaral
+  - name: Gabriel Pavan Sabino
+  - name: Luca Börger
+  - name: Laurence Culot
+bibliography: references.bib
+---
+
+## Introduction
+
+In this script, I will predict and extract values from landscapes of possible predictors for the movement of black lion tamarins (*Leontopithecus chrysopygus* - BLTs) in a 100ha Atlantic Forest fragment in the municipality of Guareí, in São Paulo, Brazil. Our objective is to use these predictors in future Integrated Step Selection Function Models (*i*SSF) [@klappstein2024; @klappstein2022] to see what factors influence the route planning process (i.e. the steps chosen by the group) in two seasons (rainy and dry).
+
+We have data on BLTs between December/2022 and September/2023, collected along three consecutive months in the rainy season and three consecutive months in the dry season. During these two field campaigns, we followed one habituated group of BLTs for 12 entire days in the rainy season and 12 entire days in the dry season. During group sampling, we recorded behaviors performed by individuals through scan sampling and the location of the group with a GPS device every 5 minutes. This forest fragment is shared by three BLT groups, each composed by 4-7 individuals.
+
+To test what factors influence the decision making processes of the BLTs in both seasons, we will create some 1) environmental; 2) energetic; and 3) social landscapes, which will then be used in the *i*SSF models [@cozzi2018]. The environmental layers consist of: number of trees, total basal area, height of the canopies, number of trees possibly bearing fruits, number of fruiting trees visited by BLTs, fruit productivity, energetic content of fruits,invertebrate biomass, and number of alarm calls. The energetic landscape consist of an estimation of VeDBA (Vectorial Dynamic Body Acceleration). Finally, the social landscape consist of probability of presence of co specifics, and the number of long calls emitted by the sampled BLT group.
+
+For building the landscapes, besides behavioral data from group sampling, we also used data from 45 30m by 10m vegetation characterization plots in which we sampled all trees with DBH larger than or equal to 3.4 cm distributed across the study area. Each vegetation plot was built in triplicates, being composed of 3 consecutive 10m by 10m subplots. For each of the trees inside the plots and that matched our criteria, we recorded the species, height, DBH, basal area, canopy diameter, and height of first branch.
+
+We also ran a phenological experiment on all the trees that could produce consumable fruits for the BLTs. Phenology trees were selected from the vegetation plots inside the study group used area, totaling 648 trees from 25 plots. We visited all phenology trees every fortnight and recorded the amount of mature fruits, immature fruits, flowers, and flower buds.
+
+We sampled invertebrate biomass through pitfall traps. In each of the 30m x 10m plots, we installed 3 pitfall traps distanced 1m from each other. Traps were filled with 125ml of 70% alcohol to preserve the arthropods trapped. We checked the traps once a week during the 3 months in rainy and dry seasons.
+
+We collected data for co specifics and to estimate VeDBA by equipping each of the groups of BLTs with GPS devices coupled with triaxial accelerometer ([Axytrek mini data loggers from Technosmart](https://www.technosmart.eu/axy-trek-mini/)). The tags recorded the location of the groups consecutively in each season, although the duration of each tag in the field varied between 2 days and 14 days.
+
+I will start this script by creating the environmental landscapes. Most of the modeling will consist of spatial gams. Some information about gam modeling can be found at the [Noam-Ross' course](https://noamross.github.io/gams-in-r-course/) and at [Nicholas Clark's blog](https://ecogambler.netlify.app/blog/interpreting-gams/).
+
+Finally, in the end of this document, I will adapt the code provided by [@fieberg2021] to create the ssf objects that we will use in further analyses.
+
+### Loading packages
+
+```{r}
+#| output: FALSE
+#| echo: TRUE
+library(amt)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(mgcv)
+library(scales)
+library(gridExtra)
+library(MASS)
+library(sf)
+library(tidygam)
+library(DHARMa)
+library(mgcViz)
+library(lubridate)
+library(sp)
+library(stringr)
+library(terra)
+```
+
+### Loading data
+
+```{r}
+load("1_1_data_SSF_BLT_2025_07_d02.rda")
+```
+
+# 1. Environmental landscapes
+
+## 1.1 Distance to fragment borders
+
+I will start by creating a raster in which each pixel contains distance values to fragment borders across the area.
+
+I will first create a 5m x 5m cells grid with the extent of the fragment.
+
+```{r}
+# Get the bounding box of the data
+bbox_forest <- st_bbox(forest_borders)
+
+# Create a polygon from the bounding box
+bbox_forest <- st_sfc(st_polygon(list(matrix(c(bbox_forest["xmin"], 
+                                               bbox_forest["ymin"],
+                                               bbox_forest["xmin"], 
+                                               bbox_forest["ymax"],
+                                               bbox_forest["xmax"], 
+                                               bbox_forest["ymax"],
+                                               bbox_forest["xmax"], 
+                                               bbox_forest["ymin"],
+                                               bbox_forest["xmin"],
+                                               bbox_forest["ymin"]),
+                                             ncol = 2, byrow = TRUE))),
+                      crs = st_crs(forest_borders))
+
+# Create the grid of 5m x 5m cells within the bounding box
+forest_grid <- st_make_grid(bbox_forest, cellsize = c(5, 5), 
+                               what = "polygons")
+```
+
+Create an object with points corresponding to the centroid of each grid cell.
+
+```{r}
+# Step 1: Ensure both grid and points have the same CRS
+forest_grid <- st_transform(forest_grid, crs = st_crs(forest_borders))
+
+# Step 2: Calculate the center of each grid cell
+cell_centers_forest <- st_centroid(forest_grid)
+cell_centers_forest <- st_sf(geometry = cell_centers_forest)
+
+points_inside_forest <- cell_centers_forest[st_within(cell_centers_forest, 
+                                                      forest_borders, 
+                                                      sparse = FALSE), ]
+```
+
+1.  **Extract forest border**
+
+Use st_boundary() to get the border (lines) of your forest fragment polygon:
+
+```{r}
+forest_border_line <- st_boundary(forest_borders)
+```
+
+2.  **Calculate distance from each point to the forest edge**
+
+Compute distances in meters
+
+-   This returns a matrix with 1 column (because `forest_border_line` is one geometry), and one row per point.
+
+-   Convert to numeric:
+
+```{r}
+distances_to_border <- as.numeric(st_distance(points_inside_forest, 
+                                              st_boundary(forest_borders)))
+# Add it to the sf object
+points_inside_forest$dist_f_b <- distances_to_border
+```
+
+**Now, convert points to raster with distance values**
+
+1.  **Convert the points to a `SpatVector`**
+
+```{r}
+# Convert sf to SpatVector
+points_vect <- vect(points_inside_forest)
+```
+
+2.  **Create a raster template**
+
+Use the same extent and resolution you used for generating the 5m x 5m grid:
+
+```{r}
+# Use 5m resolution raster template
+r_template <- rast(ext(points_vect), resolution = 5, crs = crs(points_vect))
+```
+
+3.  **Rasterize the distance values**
+
+```{r}
+# Rasterize using the dist_to_border attribute
+r_dist_to_border <- rasterize(points_vect, r_template, field = "dist_f_b")
+names(r_dist_to_border) <- "dist_f_b"
+# create color palette from low to high
+pal <- colorRampPalette(c("#d0d4d3", "#4f7160"))
+```
+
+In @fig-dist_fragment_border we can see the raster created with 5m resolution of distance to fragment borders, in meters.
+
+```{r}
+#| label: fig-dist_fragment_border
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the distances to fragment border across the area
+#| fig-cap: |
+#|       Raster with 5m resolution of distance to fragment borders, in meters.
+#| warning: FALSE    
+plot(r_dist_to_border, col = pal(100))
+```
+
+## 1.2 Number of trees
+
+I will start by modeling the amount of trees we sampled in each of our vegetation plots.
+
+Take a look at the data:
+
+```{r}
+head(bot)
+```
+
+#### Calculate the number of unique tree_id per subplot_id
+
+We have, from phenological experiment, the trees in our vegetation plots that dyed during the study. I tested whether removing all dead trees when we finished sampling phenology (end of dry season) would change our results. Since the number of dead trees is small, results did not change significantly. Thus, I will remove all dead trees for this model.
+
+```{r}
+tree_count_per_subplot_bot <- bot %>%
+  filter(alive_dry == "1") %>% 
+  group_by(subplot_id, plot_utm_x, plot_utm_y) %>%
+  summarize(num_trees = n_distinct(tree_id)) %>% 
+  rename(x = plot_utm_x, y = plot_utm_y)
+head(tree_count_per_subplot_bot)
+```
+
+@fig-n_trees_plots is a plot showing the amount of trees sampled in each vegetation plot in Guareí
+
+```{r}
+#| label: fig-n_trees_plots 
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the amount of trees sampled in each vegetation plot in Guareí 
+#| fig-cap: |
+#|       Number of trees sampled per vegetation plot in Guareí
+#| warning: FALSE     
+ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y), 
+               fill = "#4f7160", size = 0.5) +
+  geom_point(data = tree_count_per_subplot_bot, 
+             aes(x = x, y = y, size = num_trees), shape = 20) +
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black")) +
+  theme(axis.text.y = element_text(angle=90, 
+                                   hjust=0.5, size = 8, colour ="Black")) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA, size=2)) +
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_blank()) +
+  labs(title = "Number of trees") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20),
+        legend.position = "bottom",
+        legend.title = element_blank())+
+  coord_fixed()
+
+```
+
+### Model: number of trees per subplot
+
+```{r}
+summary(mod_nt_bot <- gam(num_trees ~ s(x,y, k=134,bs="gp",m=2), 
+                          method = "REML", 
+                          family = poisson(link = "log"),
+                          data = tree_count_per_subplot_bot))
+```
+
+Whith @fig-landscape_n_trees_plot we can see how our model is predicting the number of trees across the area from the vegetation plots in Guareí.
+
+```{r}
+#| label: fig-landscape_n_trees_plot
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing predicted landscape how our model is predicting the number of trees across the area from the vegetation plots in Guareí 
+#| fig-cap: |
+#|       Landscape-predicted number of trees
+vis.gam(mod_nt_bot, view = c("x", "y"),
+        plot.type = "contour",
+        contour.col = "blue", main = "Number of trees")
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_nt_bot)
+gam.check(mod_nt_bot)
+## Model looks good!
+```
+
+Now, we need to prepare the extents for which we want the predictions to be made (I called it grid) and than extract the values predicted by our model.
+
+```{r}
+# Define a grid of x and y values covering the study area
+grid_x <- seq(min(forest_guarei$x), max(forest_guarei$x), length.out = 100)
+grid_y <- seq(min(forest_guarei$y), max(forest_guarei$y), length.out = 100)
+grid <- expand.grid(x = grid_x, y = grid_y)
+
+# Predict for this new grid
+grid_predictions_nt_bot <- predict(mod_nt_bot, newdata = grid, 
+                                   type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_bt_bot <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  nt_bot = grid_predictions_nt_bot$fit,
+  se.fit = grid_predictions_nt_bot$se.fit)
+head(predictions_bt_bot)
+```
+
+I will already prepare our predictions as a raster for later use by amt package to extract the values in our ssf object.
+
+```{r}
+nt_bot_r <- rast(predictions_bt_bot, type = "xyz")
+nt_bot_r <- nt_bot_r[["nt_bot"]]
+```
+
+In @fig-plot_nt_bot we can see the predicted landscape of number of trees across the fragment in Guareí
+
+```{r}
+#| label: fig-plot_nt_bot
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape of number of trees across the fragment in Guareí 
+#| fig-cap: |
+#|       Predicted landscape of number of trees
+ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y), 
+               fill = "grey80", size = 0.5) +
+  geom_raster(data = predictions_bt_bot, 
+              aes(x = x, y = y, fill = nt_bot)) +
+  geom_contour(data = predictions_bt_bot, 
+               aes(x = x, y = y, z = nt_bot), color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  geom_point(data = tree_count_per_subplot_bot, 
+             aes(x = x, y = y, size = num_trees), shape = 20, alpha = .5) +
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black")) +
+  theme(axis.text.y = element_text(angle=90, 
+                                   hjust=0.5, size = 8, colour ="Black")) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA, size=2)) +
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_blank()) +
+  labs(title = "Number of trees") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+```
+
+## 1.3 Total basal area
+
+#### Calculate total basal area per subplot
+
+To model basal area across the area, I will calculate total basal area per subplot. As I do not have the location of all trees in the vegetation plots, this is the best way to have this structural landscape.
+
+```{r}
+bot$bsl_area_m2 <- as.numeric(bot$bsl_area_m2)
+basal_area_sp <- bot %>%
+  filter(alive_dry == "1") %>% 
+  group_by(subplot_id, plot_utm_x, plot_utm_y) %>%
+  summarise(basal_area = sum(bsl_area_m2, na.rm = TRUE)) %>% 
+  rename(x = plot_utm_x, y = plot_utm_y)
+head(basal_area_sp)
+```
+
+### Model the total basal area per subplot
+
+```{r}
+summary(mod_basal_area_log <- gam(log(basal_area) ~ s(x,y, k=134), 
+                                  data = basal_area_sp))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_basal_area_log)
+gam.check(mod_basal_area_log)
+```
+
+In @fig-tot_ba_bot we can check the predicted landscape of total basal area.
+
+```{r}
+#| label: fig-tot_ba_bot
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape of total basal area per subplot in Guareí 
+#| fig-cap: |
+#|       Predicted landscape of total basal area per subplot
+vis.gam(mod_basal_area_log, view = c("x", "y"),plot.type = "contour",
+        contour.col = "blue", main = "Log(Total basal area)")
+```
+
+The model looks fine, but there does not seem to be enough variation in total basal area for the gam model to generate significant predictions for x and y coordinates.
+
+Therefore, I will extract the predictions just for plotting.
+
+```{r}
+# Predict for this new grid
+grid_predictions_basal_area <- predict(mod_basal_area_log, newdata = grid, 
+                                       type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_basal_area <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  basal_area = exp(grid_predictions_basal_area$fit),
+  se.fit = grid_predictions_basal_area$se.fit)
+```
+
+In @fig-plot_basal_area we can see the predicted landscape of total basal area per subplot in Guareí
+
+```{r}
+#| label: fig-plot_basal_area
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape of total basal area per subplot in Guareí 
+#| fig-cap: |
+#|       Predicted landscape of total basal area per subplot
+ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_basal_area, aes(x = x, y = y, 
+                                                fill = basal_area)) +
+  geom_raster(data = predictions_basal_area, aes(x = x, y = y, 
+                                                 fill = basal_area)) +
+  geom_contour(data = predictions_basal_area, aes(x = x, y = y, 
+                                                  z = basal_area), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  geom_point(data = basal_area_sp, aes(x = x, y = y,size = basal_area),
+             shape=20, alpha = .5) +
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") +
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Total basal area per subplot (m2)")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+```
+
+## 1.4 Height of the trees
+
+I managed to get a rater with 1m resolution of canopy height for the whole world [@tolan2024]. Using Google Earth Engine I cut this raster with the shape file of the area in Guareí.
+
+```{r}
+library(terra)
+rch_1 <- rast("height_clipped.tif")
+
+# Reproject rch_1 to match gua
+rch_1 <- project(rch_1, crs(gua))
+crs(rch_1) == crs(gua)
+names(rch_1) <- "tree_H"
+
+# Convert raster to data frame
+rch_1_df <- as.data.frame(rch_1, xy = TRUE, na.rm = TRUE)
+
+# Rename raster values column for clarity (optional)
+names(rch_1_df)[3] <- "height"
+
+df_d <- df %>% 
+  filter(season == "dry")
+
+df_r <- df %>% 
+  filter(season == "wet")
+
+# Plot
+plot_dry <- ggplot() +
+  # Raster layer
+  geom_raster(data = rch_1_df, aes(x = x, y = y, fill = height)) +
+  scale_fill_viridis_c(na.value = NA) +  
+  #geom_polygon(data = forest_guarei, aes(x = x, y = y),
+  #fill = "grey80", color = "black", size = 0.5) +
+  geom_point(data = df_d, aes(x = original_x, y = original_y),
+             color = "black", size = 1.5, alpha = .1) +
+  labs(title = "Dry season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20))+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  coord_fixed()
+
+plot_rainy <- ggplot() +
+  # Raster layer
+  geom_raster(data = rch_1_df, aes(x = x, y = y, fill = height)) +
+  scale_fill_viridis_c(na.value = NA) +  
+  geom_point(data = df_r, aes(x = original_x, y = original_y),
+             color = "black", size = 1.5, alpha = .1) +
+  labs(title = "Rainy season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20))+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  coord_fixed()
+```
+
+In @fig-rcn_df_wet and @fig-rcn_df_dry we can see how BLTs used the area according to canopy height during rainy and dry seasons, respectively.
+
+```{r}
+#| label: fig-rcn_df_wet
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the movement of BLTs according to canopy height
+#| fig-cap: |
+#|       BLT relocations according to canopy height (m) during rainy season
+plot_rainy
+```
+
+```{r}
+#| label: fig-rcn_df_dry
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the movement of BLTs according to canopy height
+#| fig-cap: |
+#|       BLT relocations according to canopy height (m) during dry season
+plot_dry
+```
+
+## 1.5 Number of trees potentially with fruits
+
+I will now model the number of trees that could potentially have fruits. As potentially with fruits, I will use all trees from species that at least one individual was observed to present fruits during phenology observation.
+
+Identify the species BLTs consumed fruits from in each Season using our frugivory data
+
+```{r}
+fruits_blt <- adlib %>%
+  filter(behavior == "FRU", sp != "") %>%
+  distinct(sp, Season)
+head(fruits_blt)
+```
+
+Now, use fruits_BLT to filter bot and create new data frames with the counts of trees from species consumed by BLTs in each Season
+
+```{r}
+bot_fruits_wet <- bot %>%
+  filter(alive_rainy == "1") %>% 
+  semi_join(fruits_blt %>% 
+              filter(Season == "rainy"), by = c("plant_sp_nm" = "sp")) %>% 
+  group_by(subplot_id, plot_utm_x, plot_utm_y) %>%
+  summarize(num_trees = n_distinct(tree_id)) %>% 
+  rename(x = plot_utm_x, y = plot_utm_y)
+head(bot_fruits_wet)
+
+bot_fruits_dry <- bot %>%
+  filter(alive_dry == "1") %>% 
+  semi_join(fruits_blt %>% filter(Season == "dry"), 
+            by = c("plant_sp_nm" = "sp")) %>% 
+  group_by(subplot_id, plot_utm_x, plot_utm_y) %>%
+  summarize(num_trees = n_distinct(tree_id)) %>% 
+  rename(x = plot_utm_x, y = plot_utm_y)
+head(bot_fruits_dry)
+```
+
+I need to check whether I still have all subplots present in the data frame. It is important to model absence of fruits.
+
+```{r}
+levels(as.factor(bot_fruits_wet$subplot_id))
+levels(as.factor(bot_fruits_dry$subplot_id))
+levels(as.factor(bot$subplot_id)) 
+```
+
+A lot of subplots are missing! In the next code chunk, I will identify the missing subplots, get their coordinates, attribute 0 for the number of fruit trees, and merge with bot_fruits_dry.
+
+```{r}
+# Get the unique levels of subplot_id in fruits_per_subplot_dry
+subplot_id_bot_fruits_wet <- unique(bot_fruits_wet$subplot_id)
+subplot_id_bot_fruits_dry <- unique(bot_fruits_dry$subplot_id)
+
+# Identify the missing levels
+missing_levels_wet <- as.character(setdiff(levels(as.factor(bot$subplot_id)), 
+                                           as.character(
+                                             subplot_id_bot_fruits_wet)))
+
+missing_levels_dry <- as.character(setdiff(levels(as.factor(bot$subplot_id)), 
+                                           as.character(
+                                             subplot_id_bot_fruits_dry)))
+
+all_subplots <- bot[,c(5,6,7)]
+all_subplots <- unique(all_subplots)
+all_subplots <- all_subplots %>% 
+  rename(x = plot_utm_x, y = plot_utm_y)
+
+# Subset central_points to include only the matching subplot_id levels
+missing_subplots_wet <- all_subplots %>%
+  filter(subplot_id %in% missing_levels_wet)
+missing_subplots_dry <- all_subplots %>%
+  filter(subplot_id %in% missing_levels_dry)
+
+# Create a num_tress column in central_points_subset filled with 0
+missing_subplots_wet$num_trees <- 0
+missing_subplots_dry$num_trees <- 0
+
+# Merge fruits_per_subplot_dry and central_points_subset by subplot_id
+bot_fruits_wet <- bind_rows(bot_fruits_wet, 
+                            missing_subplots_wet)
+bot_fruits_dry <- bind_rows(bot_fruits_dry, 
+                            missing_subplots_dry)
+```
+
+### Model the number of trees potentially with fruits
+
+#### Rainy season:
+
+```{r}
+summary(mod_nft_bot_wet <- gam(num_trees ~ s(x,y,bs="gp",m=2,k=134),
+                               method = "REML",
+                               family = poisson(link = "log"),
+                               data = bot_fruits_wet))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_nft_bot_wet)
+gam.check(mod_nft_bot_wet)
+```
+
+#### Dry season:
+
+I will try a negative binomial family distribution for dry season as there are too many zeros
+
+```{r}
+summary(mod_nft_bot_dry <- gam(num_trees ~ s(x,y,bs="gp",m=2,k=134), 
+                               family = nb(),
+                               data = bot_fruits_dry))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_nft_bot_dry)
+gam.check(mod_nft_bot_dry)
+```
+
+Now, with @fig-nft_bot we can check the predicted landscape for the number of trees potentially with fruits in Guareí, per season
+
+```{r}
+#| label: fig-nft_bot
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape for the number of trees potentially with fruits in Guareí, per season 
+#| fig-cap: |
+#|       Predicted landscape of number of trees potentially with fruits per season
+par(mfrow = c(1,2))
+vis.gam(mod_nft_bot_wet, view = c("x", "y"),
+        plot.type = "contour",
+        contour.col = "blue", main = "Rainy season")
+vis.gam(mod_nft_bot_dry, view = c("x", "y"),
+        plot.type = "contour",
+        contour.col = "blue", main = "Dry season")
+par(mfrow=c(1,1))
+```
+
+Extract the predictions of number of trees with fruits from vegetation plots
+
+```{r}
+grid_predictionsn_nft_bot_wet <- predict(mod_nft_bot_wet, newdata = grid, 
+                                         type = "response", se.fit = TRUE)
+
+grid_predictions_nft_bot_dry <- predict(mod_nft_bot_dry, newdata = grid, 
+                                        type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_nft_bot_wet <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  nft_bot = (grid_predictionsn_nft_bot_wet$fit),
+  se.fit = grid_predictionsn_nft_bot_wet$se.fit)
+
+predictions_nft_bot_dry <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  nft_bot = (grid_predictions_nft_bot_dry$fit),
+  se.fit = grid_predictions_nft_bot_dry$se.fit)
+```
+
+Convert to SpatRaster
+
+```{r}
+nft_bot_wet_r <- rast(predictions_nft_bot_wet, type = "xyz")
+nft_bot_wet_r <- nft_bot_wet_r[["nft_bot"]]
+
+nft_bot_dry_r <- rast(predictions_nft_bot_dry, type = "xyz")
+nft_bot_dry_r <- nft_bot_dry_r[["nft_bot"]]
+```
+
+Code for viewing the predicted number of trees potentially with fruits across the area on each season
+
+```{r}
+plot_nft_bot_wet<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_nft_bot_wet, aes(x = x, y = y, 
+                                                 fill = nft_bot)) +
+  geom_raster(data = predictions_nft_bot_wet, aes(x = x, y = y, 
+                                                  fill = nft_bot)) +
+  geom_contour(data = predictions_nft_bot_wet, aes(x = x, y = y, 
+                                                   z = nft_bot), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  #geom_polygon(data = out_hr_df, aes(x = X, y = Y),
+  #fill = "grey80", size = 0.5)+
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  geom_point(data = bot_fruits_wet, aes(x = x, y = y, 
+                                        size = num_trees), 
+             shape=20, alpha =.5) + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, 
+                                   colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Rainy season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+
+plot_nft_bot_dry<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_nft_bot_dry, aes(x = x, y = y, 
+                                                 fill = nft_bot)) +
+  geom_raster(data = predictions_nft_bot_dry, aes(x = x, y = y, 
+                                                  fill = nft_bot)) +
+  geom_contour(data = predictions_nft_bot_dry, aes(x = x, y = y, 
+                                                   z = nft_bot), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  #geom_polygon(data = out_hr_df, aes(x = X, y = Y),
+  #fill = "grey80", size = 0.5)+
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  geom_point(data = bot_fruits_dry, aes(x = x, y = y, 
+                                        size = num_trees), 
+             shape=20, alpha =.5) + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, 
+                                   colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Dry season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+```
+
+In @fig-nft_bot_map, we can see how the model predicted the number of trees potentially with fruits across the area on each season.
+
+```{r}
+#| label: fig-nft_bot_map
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape for the number of trees potentially with fruits across the area in Guareí, per season 
+#| fig-cap: |
+#|       Predicted landscape of number of trees potentially with fruits per season across the area, per season.
+grid.arrange(plot_nft_bot_wet, plot_nft_bot_dry, ncol = 2)
+```
+
+## 1.6 Number of visited fruit trees
+
+As we understand that BLTs do not visit trees randomly, there might be an effect of preference or even a better measure of fruit availability throughout the trees the group visited during behavior sampling.
+
+I will use the data frame compiling information of all fruit trees visited by BLTs in Guareí to later select the trees visited during this study using scan and adlib data.
+
+```{r}
+trees_data <- resource_trees %>%
+  dplyr::select(tree_id = plant_id, bsl_area_m2, 
+                x = plant_utm_x, y = plant_utm_y)
+
+```
+
+I will start data organization with rainy season:
+
+```{r}
+# Prepare df_fru_wet
+df_fru_wet <- df %>%
+  filter(season == "wet", behavior == "FRU") %>%
+  mutate(prod = str_extract(modifier, "PM_[0-4]") %>% 
+           str_remove("PM_") %>% as.numeric()) %>%
+  group_by(tree_id) %>%
+  summarise(
+    sp = first(sp),
+    x = first(x),
+    y = first(y),
+    mean_prod = mean(prod, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  left_join(trees_data, by = "tree_id")
+
+# Prepare adlib_fru_t_wet
+adlib_fru_t_wet <- adlib %>%
+  filter(Season == "rainy", behavior == "FRU") %>%
+  group_by(tree_id) %>%
+  summarise(
+    sp = first(sp),
+    mean_prod = mean(as.numeric(prod_mat), na.rm = TRUE),
+    .groups = "drop") %>%
+  left_join(trees_data, by = "tree_id") %>%
+  dplyr::select(tree_id, sp, x, y, mean_prod, bsl_area_m2)
+
+# Add missing trees from adlib to df_fru_wet
+df_fru_wet <- bind_rows(
+  df_fru_wet,
+  anti_join(adlib_fru_t_wet, df_fru_wet, by = "tree_id")) %>%
+  mutate(x = coalesce(as.numeric(x.x), as.numeric(x), as.numeric(x.y)),
+         y = coalesce(as.numeric(y.x), as.numeric(y), as.numeric(y.y))) %>%
+  dplyr::select(tree_id, sp, x, y, mean_prod, bsl_area_m2)
+head(df_fru_wet)
+```
+
+Now, I will create a 15m x 15m cells grid to count the number of trees in each cell across the area.
+
+```{r}
+# Convert the data frame to an sf object (for spatial operations)
+ft_sf_wet <- st_as_sf(df_fru_wet, coords = c("x", "y"), crs = 32722)
+
+# Get the bounding box of the data
+bbox <- st_bbox(ft_sf_wet)
+
+# Create a polygon from the bounding box
+bbox_sf_wet <- st_sfc(st_polygon(list(matrix(c(bbox["xmin"], bbox["ymin"],
+                                               bbox["xmin"], bbox["ymax"],
+                                               bbox["xmax"], bbox["ymax"],
+                                               bbox["xmax"], bbox["ymin"],
+                                               bbox["xmin"], bbox["ymin"]),
+                                             ncol = 2, byrow = TRUE))),
+                      crs = st_crs(ft_sf_wet))
+
+# Create the grid of 15m x 15m cells within the bounding box
+ft_sf_wet_grid <- st_make_grid(bbox_sf_wet, cellsize = c(15, 15), 
+                               what = "polygons")
+```
+
+Count the number of trees per cell in the grid
+
+```{r}
+# Step 1: Ensure both grid and points have the same CRS
+ft_sf_wet_grid <- st_transform(ft_sf_wet_grid, crs = st_crs(ft_sf_wet))
+
+# Step 2: Calculate the center of each grid cell
+cell_centers_wet <- st_centroid(ft_sf_wet_grid)
+
+# Step 3: Use st_intersects() to count points inside each grid cell
+point_count_wet <- sapply(1:length(ft_sf_wet_grid), function(i) {
+  sum(st_intersects(ft_sf_wet_grid[i], ft_sf_wet, sparse = FALSE))})
+
+# Step 4: Create a new data frame with central coordinates and point counts
+count_ft_wet <- data.frame(
+  x = st_coordinates(cell_centers_wet)[, 1],
+  y = st_coordinates(cell_centers_wet)[, 2],
+  point_count = point_count_wet)
+# View the summary of the point counts
+summary(count_ft_wet$point_count)
+```
+
+Dry season
+
+```{r}
+# Prepare df_fru_dry
+df_fru_dry <- df %>%
+  filter(season == "dry", behavior == "FRU") %>%
+  mutate(prod = str_extract(modifier, "PM_[0-4]") %>% 
+           str_remove("PM_") %>% 
+           as.numeric()) %>%
+  group_by(tree_id) %>%
+  summarise(
+    sp = first(sp),
+    x = first(x),
+    y = first(y),
+    mean_prod = mean(prod, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  left_join(trees_data, by = "tree_id")
+
+# Prepare adlib_fru_t_dry
+adlib_fru_t_dry <- adlib %>%
+  filter(Season == "dry", behavior == "FRU") %>%
+  group_by(tree_id) %>%
+  summarise(
+    sp = first(sp),
+    mean_prod = mean(as.numeric(prod_mat), na.rm = TRUE),
+    .groups = "drop") %>%
+  left_join(trees_data, by = "tree_id") %>%
+  dplyr::select(tree_id, sp, x, y, mean_prod, bsl_area_m2)
+
+# Add missing trees from adlib to df_fru_dry
+df_fru_dry <- bind_rows(
+  df_fru_dry,
+  anti_join(adlib_fru_t_dry, df_fru_dry, by = "tree_id")) %>%
+  mutate(x = coalesce(as.numeric(x.x), as.numeric(x), 
+                      as.numeric(x.y)),
+         y = coalesce(as.numeric(y.x), as.numeric(y), 
+                      as.numeric(y.y))) %>%
+  dplyr::select(tree_id, sp, x, y, mean_prod, bsl_area_m2) %>% 
+  filter(!is.na(x))
+head(df_fru_dry)
+```
+
+Count the number of visited fruit trees per 15m x 15m cells in a grid across the area.
+
+```{r}
+# Convert the data frame to an sf object (for spatial operations)
+ft_sf_dry <- st_as_sf(df_fru_dry, coords = c("x", "y"), crs = 32722)
+
+# Get the bounding box of the data
+bbox <- st_bbox(ft_sf_dry)
+
+# Create a polygon from the bounding box
+bbox_sf_dry <- st_sfc(st_polygon(list(matrix(c(bbox["xmin"], bbox["ymin"],
+                                               bbox["xmin"], bbox["ymax"],
+                                               bbox["xmax"], bbox["ymax"],
+                                               bbox["xmax"], bbox["ymin"],
+                                               bbox["xmin"], bbox["ymin"]),
+                                             ncol = 2, byrow = TRUE))),
+                      crs = st_crs(ft_sf_dry))
+
+# Create the grid of 15m x 15m cells within the bounding box
+ft_sf_dry_grid <- st_make_grid(bbox_sf_dry, cellsize = c(15, 15), 
+                               what = "polygons")
+
+# Step 1: Ensure both grid and points have the same CRS
+ft_sf_dry_grid <- st_transform(ft_sf_dry_grid, crs = st_crs(ft_sf_dry))
+
+# Step 2: Calculate the center of each grid cell
+cell_centers_dry <- st_centroid(ft_sf_dry_grid)
+
+# Step 3: Use st_intersects() to count points inside each grid cell
+point_count_dry <- sapply(1:length(ft_sf_dry_grid), function(i) {
+  sum(st_intersects(ft_sf_dry_grid[i], ft_sf_dry, sparse = FALSE))})
+
+# Step 4: Create a new data frame with central coordinates and point counts
+count_ft_dry <- data.frame(
+  x = st_coordinates(cell_centers_dry)[, 1],
+  y = st_coordinates(cell_centers_dry)[, 2],
+  point_count = point_count_dry)
+```
+
+In @fig-nvft_wet_grid I will check the number of fruit trees visited per cell in a 15m by 15m grid in each season
+
+```{r}
+#| label: fig-nvft_wet_grid
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the number of fruit trees visited in a 15m by 15m grid. 
+#| fig-cap: |
+#|       15m by 15m grid with the fruit trees visited in the rainy (blue) and dry (red) seasons
+plot(st_geometry(ft_sf_dry_grid), col = "grey95", border = "white")
+plot(st_geometry(ft_sf_wet), add = TRUE, pch = 16, col = "darkblue", cex = .5)
+plot(st_geometry(ft_sf_dry), add = TRUE, pch = 16, col = "red", cex = .5)
+```
+
+### Model number of visited fruit trees
+
+#### Rainy season:
+
+```{r}
+summary(mod_nvft_wet <- gam(point_count ~ s(x,y, k = 200, bs = "gp", m = 2),
+                            family = poisson(link="log"),
+                            method = "REML",
+                            data = count_ft_wet))
+```
+
+Check model
+
+```{r}
+plotQQunif(mod_nvft_wet)
+gam.check(mod_nvft_wet)
+```
+
+#### Dry season:
+
+```{r}
+summary(mod_nvft_dry <- gam(point_count ~ s(x,y, k = 200, bs = "gp", m = 2),
+                            family = poisson(link="log"),
+                            method = "REML",
+                            data = count_ft_dry))
+```
+
+Check model
+
+```{r}
+plotQQunif(mod_nvft_dry)
+gam.check(mod_nvft_dry)
+```
+
+Extract predictions and store as raster
+
+```{r}
+grid_predictions_nvft_wet <- predict(mod_nvft_wet, newdata = grid, 
+                                     type = "response", 
+                                     se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_nvft_wet <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  n_vft = (grid_predictions_nvft_wet$fit),
+  se.fit = grid_predictions_nvft_wet$se.fit)
+head(predictions_nvft_wet)
+
+### Convert predictions data frame to a SpatRaster
+nvft_wet_r <- rast(predictions_nvft_wet, type = "xyz")
+nvft_wet_r <- nvft_wet_r[["n_vft"]]
+
+grid_predictions_nvft_dry <- predict(mod_nvft_dry, newdata = grid, 
+                                     type = "response", 
+                                     se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_nvft_dry <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  n_vft = (grid_predictions_nvft_dry$fit),
+  se.fit = grid_predictions_nvft_dry$se.fit)
+head(predictions_nvft_dry)
+
+##### Now, convert predictions to raster - both seasons
+nvft_dry_r <- rast(predictions_nvft_dry, type = "xyz")
+nvft_dry_r <- nvft_dry_r[["n_vft"]]
+```
+
+Prepare the plots to check predicted landscapes
+
+```{r}
+plot_nvft_wet<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_nvft_wet, aes(x = x, y = y, 
+                                              fill = n_vft)) +
+  geom_raster(data = predictions_nvft_wet, aes(x = x, y = y, 
+                                               fill = n_vft)) +
+  geom_contour(data = predictions_nvft_wet, aes(x = x, y = y, 
+                                                z = n_vft), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  #geom_polygon(data = out_hr_df, aes(x = X, y = Y),
+  #fill = "grey80", size = 0.5)+
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Rainy season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+
+plot_nvft_dry<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_nvft_dry, aes(x = x, y = y, 
+                                              fill = n_vft)) +
+  geom_raster(data = predictions_nvft_dry, aes(x = x, y = y, 
+                                               fill = n_vft)) +
+  geom_contour(data = predictions_nvft_dry, aes(x = x, y = y, 
+                                                z = n_vft), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  #geom_polygon(data = out_hr_df, aes(x = X, y = Y),
+  #fill = "grey80", size = 0.5)+
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Dry season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+```
+
+In @fig-nvft_map we can check the predicted number of visited fruit trees across the area for each season
+
+```{r}
+#| label: fig-nvft_map
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted number of visited fruit trees across the area for both seasons. 
+#| fig-cap: |
+#|       Predicted number of visited fruit trees across the area for both seasons
+grid.arrange(plot_nvft_wet, plot_nvft_dry, ncol = 2)
+```
+
+## 1.7 Fruit productivity from vegetation plots
+
+Together with data from our phenology plots, I will also phenology data from the trees BLTs fed on during behavior sampling to model fruit productivity across the area
+
+```{r}
+fru_trees <- resource_trees %>%
+  dplyr::select(tree_id = plant_id, x = plant_utm_x, y = plant_utm_y, 
+                bsl_area_m2)
+
+adlib_fru <- adlib %>%
+  filter(!is.na(prod_cons), behavior == "FRU", sp != "") %>%
+  distinct(tree_id, sp, Season, prod_cons) %>%
+  rename(Mat_fruit = prod_cons) %>%
+  left_join(fru_trees, by = "tree_id") %>%
+  filter(bsl_area_m2 > 0) %>% 
+  mutate(x = as.numeric(x), y = as.numeric(y)) %>% 
+  filter(!is.na(x), !is.na(y))
+
+adlib_fru <- adlib_fru %>% rename(basal_area = bsl_area_m2)
+
+pheno_w <- pheno %>% 
+  filter(Season == "rainy", alive_end == "1", Mat_fruit > 0) %>% 
+  dplyr::select(tree_id, sp, Season, Mat_fruit, x, y,  basal_area)
+
+pheno_d <- pheno %>% 
+  filter(Season == "dry", alive_end == "1", Mat_fruit > 0) %>% 
+  dplyr::select(tree_id, sp, Season, Mat_fruit, x, y, basal_area)
+
+adlib_fru_w <- adlib_fru %>%
+  filter(Season == "rainy")
+adlib_fru_d <- adlib_fru %>%
+  filter(Season == "dry")
+
+# Combine the two datasets using full_join to retain all trees
+trees_w <- full_join(pheno_w, adlib_fru_w,
+                     by = c("tree_id", "sp", "Season", "x", "y", 
+                            "basal_area", "Mat_fruit")) %>% 
+  mutate(fruit_prod = Mat_fruit * basal_area) %>% 
+  group_by(tree_id, x, y, sp) %>% 
+  summarize(mean_prod = mean(fruit_prod, na.rm = TRUE)) 
+
+trees_d <- full_join(pheno_d, adlib_fru_d,
+                     by = c("tree_id", "sp", "Season", "x", "y", 
+                            "basal_area", "Mat_fruit")) %>% 
+  mutate(fruit_prod = Mat_fruit * basal_area) %>% 
+  group_by(tree_id, x, y, sp) %>% 
+  summarize(mean_prod = mean(fruit_prod, na.rm = TRUE)) 
+```
+
+### Model fruit productivity
+
+#### Rainy season:
+
+```{r}
+summary(mod_fruit_prod_bot_wet <- gam(log(mean_prod) ~ s(x,y,k=110),
+                                      data = trees_w))
+```
+
+Check the model
+
+```{r}
+gam.check(mod_fruit_prod_bot_wet) 
+plotQQunif(mod_fruit_prod_bot_wet)
+```
+
+#### Dry season:
+
+```{r}
+summary(mod_fruit_prod_bot_dry <- gam(log(mean_prod) ~ s(x,y,k=105),
+                                      data = trees_d))
+```
+
+Check the model
+
+```{r}
+gam.check(mod_fruit_prod_bot_dry)
+plotQQunif(mod_fruit_prod_bot_dry)
+```
+
+With @fig-fprod_bot I will check the predicted landscape for fruit productivity for each season.
+
+I can see the gam models could not reach significance. Therefore, I will not go further with these predictions.
+
+```{r}
+#| label: fig-fprod_bot
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted fruit productivity for both seasons
+#| fig-cap: |
+#|       Predicted fruit productivity for both seasons
+par(mfrow=c(1,2))
+vis.gam(mod_fruit_prod_bot_wet, view = c("x", "y"),plot.type = "contour",
+        contour.col = "blue", main = "Rainy season")
+
+vis.gam(mod_fruit_prod_bot_dry, view = c("x", "y"),plot.type = "contour",
+        contour.col = "blue", main = "Dry season")
+par(mfrow=c(1,1))
+```
+
+## 1.8 Fruit productivity from visited fruiting trees
+
+I could not reach a general landscape for fruit productivity across the area based on trees in phenology and visited. Now, considering that BLTs might plan steps based on preference for specific trees, I will model productivity for the trees visited.
+
+```{r}
+df_fru_wet_clean <- df_fru_wet %>%
+  mutate(mean_prod = ifelse(is.nan(mean_prod), 1, mean_prod)) %>% 
+  mutate(prod = mean_prod*bsl_area_m2) %>% 
+  filter(!is.na(prod) & !is.nan(prod))
+
+df_fru_dry_clean <- df_fru_dry %>%
+  mutate(mean_prod = ifelse(is.nan(mean_prod), 1, mean_prod)) %>% 
+  mutate(prod = mean_prod*bsl_area_m2) %>% 
+  filter(!is.na(prod) & !is.nan(prod))
+```
+
+### Model productivity of visited trees
+
+#### Rainy season:
+
+```{r}
+summary(mod_vft_prod_wet <- gam(log(prod) ~ s(x,y, k = 95, bs = "gp", m = 2),
+                                method = "REML",
+                                data = df_fru_wet_clean))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_vft_prod_wet)
+gam.check(mod_vft_prod_wet)
+```
+
+Dry season:
+
+```{r}
+summary(mod_vft_prod_dry <- gam(log(prod) ~ s(x,y, k = 88, bs = "gp", m = 2),
+                                method = "REML",
+                                data = df_fru_dry_clean))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_vft_prod_dry)
+gam.check(mod_vft_prod_dry)
+```
+
+With @fig-fprod_vis I will check the predicted landscape for fruit productivity based on visited trees, for each season.
+
+```{r}
+#| label: fig-fprod_vis
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted fruit productivity based on visited trees for both seasons
+#| fig-cap: |
+#|       Predicted fruit productivity of visited trees for both seasons
+par(mfrow=c(1,2))
+vis.gam(mod_vft_prod_wet, view = c("x", "y"), plot.type = "contour",
+        contour.col = "blue", main = "#Fruit trees - WS")
+vis.gam(mod_vft_prod_dry, view = c("x", "y"), plot.type = "contour",
+        contour.col = "blue", main = "#Fruit trees - DS")
+par(mfrow=c(1,1))
+```
+
+As with productivity from both phenology experiments and behavior, I can see the gam models could not reach significance for visited trees. Therefore, I will not go further with these predictions.
+
+## 1.9 Fruit energetic content from trees based on vegetation plots and visited trees
+
+```{r}
+fruits <- fruit_nutrients %>% 
+  dplyr::select("sp", "mean_ART", "mean_Lipid", "mean_Protein", 
+                "tot_dry_mass", "n_fruits_sampled") %>% 
+  mutate(sugar = mean_ART*15.1, fats = mean_Lipid*35, 
+         protein = mean_Protein*14.1) %>% 
+  mutate(KJ = ((sugar+fats+protein)*(tot_dry_mass/n_fruits_sampled))/100) %>% 
+  dplyr::select("sp", "KJ") %>% 
+  filter(KJ != "NA")
+
+trees_w <- left_join(trees_w, fruits, by="sp")
+trees_w_KJ <- trees_w %>% 
+  filter(KJ != "NA")
+head(trees_w_KJ)
+
+trees_d <- left_join(trees_d, fruits, by="sp")
+trees_d_KJ <- trees_d %>% 
+  filter(KJ != "NA")
+head(trees_d_KJ)
+```
+
+### Model fruit energy for trees from vegetation plots and visited trees
+
+#### Rainy season:
+
+```{r}
+summary(mod_KJ_bot_wet <- gam(log(KJ) ~ s(x,y, k=60), data=trees_w_KJ))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_KJ_bot_wet)
+gam.check(mod_KJ_bot_wet)
+```
+
+#### Dry season:
+
+```{r}
+summary(mod_KJ_bot_dry <- gam(log(KJ) ~ s(x,y, k=90), data=trees_d_KJ))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_KJ_bot_dry)
+gam.check(mod_KJ_bot_dry)
+```
+
+With @fig-KJ_bot I will check the predicted landscape for fruit energetic content based on vegetation plots and visited trees, for each season.
+
+```{r}
+#| label: fig-KJ_bot
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted fruit energetic content (KJ) based on vegetation plots and visited trees for both seasons
+#| fig-cap: |
+#|       Predicted fruit energetic content (KJ) based on vegetation plots and visited trees for both seasons
+par(mfrow=c(1,2))
+vis.gam(mod_KJ_bot_wet, view = c("x", "y"),plot.type = "contour",
+        contour.col = "blue")
+vis.gam(mod_KJ_bot_dry, view = c("x", "y"),plot.type = "contour",
+        contour.col = "blue")
+par(mfrow=c(1,1))
+```
+
+Models do not look good and I could not find a transformation to improve them.
+
+I will use them this way for now.
+
+Extract predictions and transform to raster:
+
+```{r}
+grid_predictions_KJ_bot_wet <- predict(mod_KJ_bot_wet, newdata = grid,
+                                       type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_KJ_bot_wet <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  KJ_bot = (grid_predictions_KJ_bot_wet$fit),
+  se.fit = grid_predictions_KJ_bot_wet$se.fit)
+
+### Convert predictions data frame to a SpatRaster
+KJ_bot_wet_r <- rast(predictions_KJ_bot_wet, type = "xyz")
+KJ_bot_wet_r <- KJ_bot_wet_r[["KJ_bot"]]
+
+# Predict for this new grid
+grid_predictions_KJ_bot_dry <- predict(mod_KJ_bot_dry, newdata = grid, 
+                                       type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_KJ_bot_dry <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  KJ_bot = (grid_predictions_KJ_bot_dry$fit),
+  se.fit = grid_predictions_KJ_bot_dry$se.fit)
+
+### Convert predictions data frame to a SpatRaster
+KJ_bot_dry_r <- rast(predictions_KJ_bot_dry, type = "xyz")
+KJ_bot_dry_r <- KJ_bot_dry_r[["KJ_bot"]]
+```
+
+Prepare the plots to check predicted landscapes
+
+```{r}
+plot_KJ_bot_wet<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_KJ_bot_wet, aes(x = x, y = y, 
+                                                fill = KJ_bot)) +
+  geom_raster(data = predictions_KJ_bot_wet, aes(x = x, y = y, 
+                                                 fill = KJ_bot)) +
+  geom_contour(data = predictions_KJ_bot_wet, aes(x = x, y = y, 
+                                                  z = KJ_bot), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  geom_point(data = trees_w_KJ, aes(x = x, y = y, size = KJ), 
+             shape=20, alpha = .5) + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Rainy season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+
+plot_KJ_bot_dry<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_KJ_bot_dry, aes(x = x, y = y, 
+                                                fill = KJ_bot)) +
+  geom_raster(data = predictions_KJ_bot_dry, aes(x = x, y = y, 
+                                                 fill = KJ_bot)) +
+  geom_contour(data = predictions_KJ_bot_dry, aes(x = x, y = y, 
+                                                  z = KJ_bot), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  geom_point(data = trees_d_KJ, aes(x = x, y = y, size = KJ), 
+             shape=20, alpha = .5) +  
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Dry season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+```
+
+In @fig-KJ_bot_map we can check the predicted fruit energetic content for fruits from vegetation plots and visited trees for each season
+
+```{r}
+#| label: fig-KJ_bot_map
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted fruit energetic content for fruits from vegetation plots and visited trees for each season 
+#| fig-cap: |
+#|       Predicted fruit energetic content (KJ) for fruits from vegetation plots and visited trees for each season
+grid.arrange(plot_KJ_bot_wet, plot_KJ_bot_dry, ncol = 2)
+```
+
+## 1.10 Fruit energetic content from visited trees
+
+I will now model the energetic content only for of the fruits from visited trees.
+
+```{r}
+df_fru_wet_clean_KJ <- left_join(df_fru_wet_clean, fruits, by="sp") %>% 
+  filter(KJ != "NA") %>% 
+  mutate(prod_KJ = mean_prod*KJ)
+head(df_fru_wet_clean_KJ)
+
+df_fru_dry_clean_KJ <- left_join(df_fru_dry_clean, fruits, by="sp") %>% 
+  filter(KJ != "NA") %>% 
+  mutate(prod_KJ = mean_prod*KJ)
+head(df_fru_dry_clean_KJ)
+```
+
+### Model fruit energy for visited trees
+
+#### Rainy season:
+
+```{r}
+summary(mod_KJ_vft_wet <- gam(log(KJ) ~ s(x,y, k = 89, bs = "gp", m = 2),
+                              method = "REML",
+                              data = df_fru_wet_clean_KJ))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_KJ_vft_wet)
+gam.check(mod_KJ_vft_wet)
+```
+
+#### Dry season:
+
+```{r}
+summary(mod_KJ_vft_dry <- gam(log(KJ) ~ s(x,y, k = 84, bs = "gp", m = 2),
+                              method = "REML",
+                              data = df_fru_dry_clean_KJ))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_KJ_vft_dry)
+gam.check(mod_KJ_vft_dry)
+```
+
+Again, the models do not look good, but I could not find any transformation to improve or change model fit. I will use like this for now.
+
+```{r}
+#| label: fig-KJ_vis
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape of fruit energetic content (KJ) for fruits from visited trees for each season
+#| fig-cap: |
+#|       Predicted landscape of fruit energetic content (KJ) for fruits from visited trees for each season
+par(mfrow = c(1,2))
+vis.gam(mod_KJ_vft_wet, view = c("x", "y"), plot.type = "contour",
+        contour.col = "blue", main = "Rainy season")
+vis.gam(mod_KJ_vft_dry, view = c("x", "y"), plot.type = "contour",
+        contour.col = "blue", main = "Dry season")
+par(mfrow = c(1,1))
+```
+
+In @fig-KJ_vis we can check the predicted landscape of fruit energetic content for fruits from visited trees for each season
+
+Extract the predictions and store as SpatRaster
+
+```{r}
+grid_predictions_KJ_vft_wet <- predict(mod_KJ_vft_wet, newdata = grid, 
+                                       type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_KJ_vft_wet <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  KJ_vft = (grid_predictions_KJ_vft_wet$fit),
+  se.fit = grid_predictions_KJ_vft_wet$se.fit)
+head(predictions_KJ_vft_wet)
+
+grid_predictions_KJ_vft_dry <- predict(mod_KJ_vft_dry, newdata = grid, 
+                                       type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_KJ_vft_dry <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  KJ_vft = (grid_predictions_KJ_vft_dry$fit),
+  se.fit = grid_predictions_KJ_vft_dry$se.fit)
+head(predictions_KJ_vft_dry)
+
+# Convert predictions data frame to a SpatRaster
+KJ_vft_wet_r <- rast(predictions_KJ_vft_wet, type = "xyz")
+KJ_vft_wet_r <- KJ_vft_wet_r[["KJ_vft"]]
+KJ_vft_dry_r <- rast(predictions_KJ_vft_dry, type = "xyz")
+KJ_vft_dry_r <- KJ_vft_dry_r[["KJ_vft"]]
+```
+
+Prepare the plots to check predicted landscapes
+
+```{r}
+plot_KJ_vft_wet<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_KJ_vft_wet, aes(x = x, y = y, 
+                                                fill = KJ_vft)) +
+  geom_raster(data = predictions_KJ_vft_wet, aes(x = x, y = y, 
+                                                 fill = KJ_vft)) +
+  geom_contour(data = predictions_KJ_vft_wet, aes(x = x, y = y, 
+                                                  z = KJ_vft), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  geom_point(data = df_fru_wet_clean_KJ, aes(x = x, y = y, size = KJ), 
+             shape=20, alpha = .5) + 
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Rainy season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+
+plot_KJ_vft_dry<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_KJ_vft_dry, aes(x = x, y = y, 
+                                                fill = KJ_vft)) +
+  geom_raster(data = predictions_KJ_vft_dry, aes(x = x, y = y, 
+                                                 fill = KJ_vft)) +
+  geom_contour(data = predictions_KJ_vft_dry, aes(x = x, y = y, 
+                                                  z = KJ_vft), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  geom_point(data = df_fru_dry_clean_KJ, aes(x = x, y = y, size = KJ), 
+             shape=20, alpha = .5) + 
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Dry season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+```
+
+In @fig-KJ_vis_map we can check the predicted fruit energetic content for fruits from visited trees for each season
+
+```{r}
+#| label: fig-KJ_vis_map
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted fruit energetic content for fruits from visited trees for each season 
+#| fig-cap: |
+#|       Predicted fruit energetic content (KJ) for fruits from visited trees for each season
+grid.arrange(plot_KJ_vft_wet, plot_KJ_vft_dry, ncol = 2)
+```
+
+## 1.11 Invertebrate biomass
+
+Using the biomass of invertebrates from pitfall traps, I will create a landscape for each season to have an estimate of availability of invertebrates across the area for each season.
+
+```{r}
+insect_wet <- insect %>% 
+  filter(season == "wet")
+insect_dry <- insect %>% 
+  filter(season == "dry")
+```
+
+### Model invertebrate biomass
+
+#### Rainy season:
+
+```{r}
+summary(mod_insect_wet <- gam(mean_dry_weight ~ s(x,y, k=25, bs="gp", m=2), 
+                              data = insect_wet))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_insect_wet)
+gam.check(mod_insect_wet)
+```
+
+#### Dry season:
+
+```{r}
+summary(mod_insect_dry <- gam(log(mean_dry_weight) ~ s(x,y, k=25, bs="gp", m=2), 
+                              data = insect_dry))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_insect_dry)
+gam.check(mod_insect_dry)
+```
+
+In @fig-insect we can check the predicted landscapes of invertebrate biomass for each season
+
+```{r}
+#| label: fig-insect
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscpae of invertebrate biomass for each season 
+#| fig-cap: |
+#|       Predicted landscpae of invertebrate biomass (g) for each season 
+par(mfrow=c(1,2))
+vis.gam(mod_insect_wet, plot.type = "contour", 
+        contour.col = "blue", main = "Rainy season")
+vis.gam(mod_insect_dry, plot.type = "contour", 
+        contour.col = "blue", main = "Dry season")
+par(mfrow=c(1,1))
+```
+
+As there is no significance for the rainy season (the availability seems to be constant throughout the area), I will only use the predictions for the dry season in the ssf models.
+
+Extract predictions and store as SpatRaster - dry season
+
+```{r}
+grid_predictions_insect_wet <- predict(mod_insect_wet, newdata = grid, 
+                                       type = "response", 
+                                       se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_insect_wet <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  inv_bio = (grid_predictions_insect_wet$fit),
+  se.fit = grid_predictions_insect_wet$se.fit)
+
+grid_predictions_insect_dry <- predict(mod_insect_dry, newdata = grid, 
+                                       type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_insect_dry <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  inv_bio = (grid_predictions_insect_dry$fit),
+  se.fit = grid_predictions_insect_dry$se.fit)
+head(predictions_insect_dry)
+
+### Convert predictions data frame to a SpatRaster
+inv_bio_dry_r <- rast(predictions_insect_dry, type = "xyz")
+inv_bio_dry_r <- inv_bio_dry_r[["inv_bio"]]
+```
+
+Prepare the plot to inspect the landscape prediction across the area in Guarei
+
+```{r}
+plot_inv_bio_wet<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_insect_wet, aes(x = x, y = y, 
+                                                fill = inv_bio)) +
+  geom_raster(data = predictions_insect_wet, aes(x = x, y = y, 
+                                                 fill = inv_bio)) +
+  geom_contour(data = predictions_insect_wet, aes(x = x, y = y, 
+                                                  z = inv_bio), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  geom_point(data = insect_wet, aes(x = x, y = y, size = mean_dry_weight),
+             shape = 20, alpha = .5) + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Rainy season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+
+plot_inv_bio_dry<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_insect_dry, aes(x = x, y = y, 
+                                                fill = inv_bio)) +
+  geom_raster(data = predictions_insect_dry, aes(x = x, y = y, 
+                                                 fill = inv_bio)) +
+  geom_contour(data = predictions_insect_dry, aes(x = x, y = y, 
+                                                  z = inv_bio), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") +
+  geom_point(data = insect_dry, aes(x = x, y = y, size = mean_dry_weight),
+             shape = 20, alpha = .5) + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Dry season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+```
+
+In @fig-insect_map we can see the predicted landscape of invertebrate biomass for each season across the area in Guarei
+
+```{r}
+#| label: fig-insect_map
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscpae of invertebrate biomass for each season across the area in Guarei
+#| fig-cap: |
+#|       Predicted landscpae of invertebrate biomass (g) for each season across Guarei
+grid.arrange(plot_inv_bio_wet, plot_inv_bio_dry, ncol=2)
+```
+
+## 1.12 Number of alarm calls
+
+As a proxy for risk perception, I will model the number of alarm calls, recorded as adlib, for both rainy and dry seasons
+
+```{r}
+levels(as.factor(adlib$behavior))
+alarm_df <- adlib %>%
+  dplyr::filter(behavior == ".AL") %>%
+  dplyr::select(Season, date, time, x, y, behavior, 
+                mod = behav_modifier, height, 
+                cohesion)
+```
+
+I will use the same approach of using a grid of 15m x 15m cells to count the amount of alarm calls throughout the area
+
+```{r}
+alarm_sf <- st_as_sf(alarm_df, coords = c("x", "y"), crs = 32722)
+
+alarm_sf_w <- alarm_sf %>% filter(alarm_sf$Season == "rainy")
+alarm_sf_d <- alarm_sf %>% filter(alarm_sf$Season == "dry")
+
+# Get the bounding box of the data
+bbox <- st_bbox(alarm_sf)
+
+# Create a polygon from the bounding box
+bbox_sf <- st_sfc(st_polygon(list(matrix(c(bbox["xmin"], bbox["ymin"],
+                                           bbox["xmin"], bbox["ymax"],
+                                           bbox["xmax"], bbox["ymax"],
+                                           bbox["xmax"], bbox["ymin"],
+                                           bbox["xmin"], bbox["ymin"]),
+                                         ncol = 2, byrow = TRUE))),
+                  crs = st_crs(alarm_sf))
+
+# Create the grid of 15m x 15m cells within the bounding box
+alarm_grid <- st_make_grid(bbox_sf, cellsize = c(15, 15), what = "polygons")
+```
+
+In @fig-alarm_grid we can see the number of alarm calls per 15m by 15m cells
+
+```{r}
+#| label: fig-alarm_grid
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the number of alarm calls per 15m by 15m cells
+#| fig-cap: |
+#|       Number of alarm calls per 15m by 15m cells
+plot(st_geometry(alarm_grid), col = "lightgrey", border = "white")
+plot(st_geometry(alarm_sf_w), add = TRUE, pch = 16, col = "darkblue", cex = .5)
+plot(st_geometry(alarm_sf_d), add = TRUE, pch = 16, col = "red", cex = .5)
+```
+
+Count the number of alarm calls per cell
+
+```{r}
+# Step 1: Ensure both grid and points have the same CRS
+alarm_grid <- st_transform(alarm_grid, crs = st_crs(alarm_sf))
+
+# Step 2: Calculate the center of each grid cell
+cell_centers <- st_centroid(alarm_grid)
+
+# Step 3: Use st_intersects() to count points inside each grid cell
+point_count_w <- sapply(1:length(alarm_grid), function(i) {
+  sum(st_intersects(alarm_grid[i], alarm_sf_w, sparse = FALSE))})
+
+point_count_d <- sapply(1:length(alarm_grid), function(i) {
+  sum(st_intersects(alarm_grid[i], alarm_sf_d, sparse = FALSE))})
+
+
+# Step 4: Create a new data frame with central coordinates and point counts
+count_alarms_w <- data.frame(x = st_coordinates(cell_centers)[, 1],
+                             y = st_coordinates(cell_centers)[, 2],
+                             point_count = point_count_w)
+
+count_alarms_d <- data.frame(x = st_coordinates(cell_centers)[, 1],
+                             y = st_coordinates(cell_centers)[, 2],
+                             point_count = point_count_d)
+
+# View the summary of the point counts
+summary(count_alarms_w$point_count)
+summary(count_alarms_d$point_count)
+```
+
+### Model the number of alarm calls
+
+#### Rainy season:
+
+```{r}
+# Find theta
+b_w <- gam(point_count~s(x,y),family=nb(),data=count_alarms_w)
+b_w<-b_w$family$getTheta(TRUE)
+
+# Now fit
+summary(mod_alarm_w <- gam(point_count ~ s(x,y, k = 100, bs = "gp", m = 2),
+                           family = nb(theta = b_w, link = "log"),
+                           method = "REML",
+                           data = count_alarms_w))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_alarm_w)
+gam.check(mod_alarm_w)
+```
+
+#### Dry season:
+
+```{r}
+summary(mod_alarm_d <- gam(point_count ~ s(x,y, k = 100, bs = "gp", m = 2),
+                           family = nb(),
+                           method = "REML",
+                           data = count_alarms_d))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_alarm_d)
+gam.check(mod_alarm_d)
+```
+
+In @fig-alarm we can check the predicted landscape of number of alarm calls for both seasons
+
+```{r}
+#| label: fig-alarm
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape of number of alarm calls for both seasons
+#| fig-cap: |
+#|       Predicted landscape of number of alarm calls for both seasons
+par(mfrow=c(1,2))
+vis.gam(mod_alarm_w, view = c("x", "y"), plot.type = "contour",
+        contour.col = "blue", main = "Rainy season")
+vis.gam(mod_alarm_d, view = c("x", "y"), plot.type = "contour",
+        contour.col = "blue", main = "Dry season")
+par(mfrow=c(1,1))
+```
+
+As there is no significance for alarms in the rainy season, I will not use the predictions of number of alarm calls for the rainy season in the ssf.
+
+Extract predictions and store as SpatRaster
+
+```{r}
+grid_predictions_alarm_w <- predict(mod_alarm_w, newdata = grid, 
+                                    type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_n_alarm_w <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  n_alarm = (grid_predictions_alarm_w$fit),
+  se.fit = grid_predictions_alarm_w$se.fit)
+
+grid_predictions_alarm_d <- predict(mod_alarm_d, newdata = grid, 
+                                    type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_n_alarm_d <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  n_alarm = (grid_predictions_alarm_d$fit),
+  se.fit = grid_predictions_alarm_d$se.fit)
+
+### Convert predictions data frame to a SpatRaster
+n_alarm_dry_r <- rast(predictions_n_alarm_d, type = "xyz")
+n_alarm_dry_r <- n_alarm_dry_r[["n_alarm"]]
+```
+
+Prepare the plots to see the predicted landscape throughout the area for both seasons
+
+```{r}
+plot_n_alarm_w<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_n_alarm_w, aes(x = x, y = y, 
+                                               fill = n_alarm)) +
+  geom_raster(data = predictions_n_alarm_w, aes(x = x, y = y, 
+                                                fill = n_alarm)) +
+  geom_contour(data = predictions_n_alarm_w, aes(x = x, y = y, 
+                                                 z = n_alarm), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  #geom_polygon(data = out_hr_df, aes(x = X, y = Y),
+  #fill = "grey80", size = 0.5)+
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Rainy season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+
+plot_n_alarm_d<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_n_alarm_d, aes(x = x, y = y, 
+                                               fill = n_alarm)) +
+  geom_raster(data = predictions_n_alarm_d, aes(x = x, y = y, 
+                                                fill = n_alarm)) +
+  geom_contour(data = predictions_n_alarm_d, aes(x = x, y = y, 
+                                                 z = n_alarm), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  #geom_polygon(data = out_hr_df, aes(x = X, y = Y),
+  #fill = "grey80", size = 0.5)+
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Dry season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+```
+
+In @fig-alarm_map we can see the predicted landscape of number of alarm calls throughout the area for both seasons
+
+```{r}
+#| label: fig-alarm_map
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape of number of alarm calls across the area for both seasons
+#| fig-cap: |
+#|       Predicted landscape of number of alarm calls across the area for both seasons
+grid.arrange(plot_n_alarm_w, plot_n_alarm_d, ncol=2)
+```
+
+# 2. Energetic landscape
+
+## 2.1 Modeling VeDBA
+
+Now, as a proxy for energy expenditure, I will model VeDBA (*Vectorial Dynamic Body Acceleration*) derived from triaxial accelerometers installed on BLTs. This data was collected using [Axytrek mini data loggers from Technosmart](https://www.technosmart.eu/axy-trek-mini/). The devices were installed on two individuals per group and programmed to record the triaxial acceleration of the individuals 24/7 with frequency of 25Hz.
+
+```{r}
+vedba <- vedba_df[,-c(1)]
+head(vedba)
+vedba <- vedba %>%
+  mutate(Season = case_when(
+    date >= as.Date("2023-01-21") & date <= as.Date("2023-03-04") ~ "rainy",
+    date >= as.Date("2023-08-10") & date <= as.Date("2023-08-25") ~ "dry",
+    TRUE ~ NA_character_))
+
+vedba <- vedba %>%
+  mutate(t_ = ymd_hms(t_)) %>%  # Convert character to POSIXct
+  group_by(id) %>%
+  arrange(time, .by_group = TRUE) %>%  # Ensure time is ordered within each ID
+  mutate(time_difference_s = as.numeric(difftime(time, lag(time), 
+                                                 units = "secs"))) %>%
+  ungroup()
+
+vedba <- as.data.frame(vedba)
+vedba$vedba_control <- vedba$sum_vedba/vedba$time_difference_s
+head(vedba)
+```
+
+Considering that we could have multiple GPS locations at the same coordinates, I will compute mean values of vedba_control for same coordinates.
+
+```{r}
+vedba <- vedba %>%
+  group_by(x, y) %>%
+  mutate(mean_vedba_control = mean(vedba_control, na.rm = TRUE)) %>%
+  ungroup() %>% 
+  distinct(x, y, .keep_all = TRUE)
+head(vedba)
+```
+
+### Model VeDBA
+
+#### Rainy season:
+
+In the rainy season, as the accelerometers did not record for many days for BLT group 1 and we could not retrieve the accelerometers from BLT group 2, I will model the total VeDBA estimations (using VeDBA summed from both seasons) as well.
+
+```{r}
+vedba_wet <- subset(vedba, Season == "rainy" & !is.na(vedba_control) & 
+                      time_difference_s != 0)
+summary(mod_vedba_wet <- gam(log(mean_vedba_control) ~ s(x,y, k = 500, 
+                                                         bs="gp", m=2), 
+                             method = "REML",
+                             data = vedba_wet))
+```
+
+Check model VeDBA
+
+```{r}
+plotQQunif(mod_vedba_wet)
+gam.check(mod_vedba_wet) 
+```
+
+Model VeDBA ALL (total VeDBA for both seasons)
+
+```{r}
+vedba <- subset(vedba, !is.na(mean_vedba_control))
+vedba <- vedba %>%
+  filter(mean_vedba_control > 0) %>% 
+  filter(is.finite(mean_vedba_control))
+summary(mod_vedba_all <- gam(log(mean_vedba_control) ~ s(x,y, bs = 'gp', 
+                                                         k = 500, m = 2), 
+                             data = vedba))
+```
+
+Check model VeDBA ALL
+
+```{r}
+plotQQunif(mod_vedba_all)
+gam.check(mod_vedba_all) 
+```
+
+#### Dry season:
+
+```{r}
+vedba_dry <- subset(vedba, Season == "dry" & !is.na(mean_vedba_control) & 
+                      time_difference_s != 0)
+vedba_dry <- subset(vedba_dry, !is.na(mean_vedba_control))
+vedba_dry <- vedba_dry %>%
+  filter(mean_vedba_control > 0)
+summary(mod_vedba_dry <- gam(log(mean_vedba_control) ~ s(x,y, bs = 'gp', 
+                                                         k = 500, m = 2), 
+                             data = vedba_dry))
+```
+
+Check model
+
+```{r}
+plotQQunif(mod_vedba_dry)
+gam.check(mod_vedba_dry)
+```
+
+In @fig-VeDBA_A we can see the predicted landscape of VeDBA collected from accelerometers during the rainy season. In @fig-VeDBA_B the predicted landscape of VeDBA for dry season. Finally, @fig-VeDBA_C shows the predicted landscape of VeDBA for both rainy and dry seasons combined.
+
+```{r}
+#| label: fig-VeDBA_A
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape of VeDBA for rainy season
+#| fig-cap: |
+#|       Predicted landscape of VeDBA for rainy season
+vis.gam(mod_vedba_wet, view = c("x", "y"), plot.type = "contour",
+        contour.col = "blue", main = "Rainy season")
+```
+
+```{r}
+#| label: fig-VeDBA_B
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape of VeDBA for dry season
+#| fig-cap: |
+#|       Predicted landscape of VeDBA for dry season
+vis.gam(mod_vedba_dry, view = c("x", "y"), plot.type = "contour",
+        contour.col = "blue", main = "Dry season")
+```
+
+```{r}
+#| label: fig-VeDBA_C
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape of VeDBA for rainy and dry seasons combined
+#| fig-cap: |
+#|       Predicted landscape of VeDBA rainy and dry seasons combined
+vis.gam(mod_vedba_all, view = c("x", "y"), plot.type = "contour",
+        contour.col = "blue", main = "Total VeDBA")
+```
+
+Extract predicted values and store as SpatRaster
+
+```{r}
+grid_predictions_vedba_wet <- predict(mod_vedba_wet, newdata = grid, 
+                                      type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_vedba_wet <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  VeDBA = exp(grid_predictions_vedba_wet$fit),
+  se.fit = grid_predictions_vedba_wet$se.fit)
+
+grid_predictions_vedba_dry <- predict(mod_vedba_dry, newdata = grid, 
+                                      type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_vedba_dry <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  VeDBA = exp(grid_predictions_vedba_dry$fit),
+  se.fit = grid_predictions_vedba_dry$se.fit)
+
+grid_predictions_vedba_all <- predict(mod_vedba_all, newdata = grid, 
+                                      type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_vedba_all <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  VeDBA_all = exp(grid_predictions_vedba_all$fit),
+  se.fit = grid_predictions_vedba_all$se.fit)
+
+### Convert predictions data frame to a SpatRaster
+vedba_wet_r <- rast(predictions_vedba_wet, type = "xyz")
+vedba_wet_r <- vedba_wet_r[["VeDBA"]]
+vedba_dry_r <- rast(predictions_vedba_dry, type = "xyz")
+vedba_dry_r <- vedba_dry_r[["VeDBA"]]
+vedba_all_r <- rast(predictions_vedba_all, type = "xyz")
+vedba_all_r <- vedba_all_r[["VeDBA_all"]]
+```
+
+Prepare the plots to see predicted landscapes across the area
+
+```{r}
+plot_vedba_wet<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_vedba_wet, aes(x = x, y = y, 
+                                               fill = VeDBA)) +
+  geom_raster(data = predictions_vedba_wet, aes(x = x, y = y, 
+                                                fill = VeDBA)) +
+  geom_contour(data = predictions_vedba_wet, aes(x = x, y = y, 
+                                                 z = VeDBA), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  geom_point(data = vedba_wet, aes(x = x, y = y, size = mean_vedba_control),
+             shape = 20, alpha = .5) + 
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Rainy season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+
+plot_vedba_dry<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_vedba_dry, aes(x = x, y = y, 
+                                               fill = VeDBA)) +
+  geom_raster(data = predictions_vedba_dry, aes(x = x, y = y, 
+                                                fill = VeDBA)) +
+  geom_contour(data = predictions_vedba_dry, aes(x = x, y = y, 
+                                                 z = VeDBA), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  geom_point(data = vedba_dry, aes(x = x, y = y, size = mean_vedba_control),
+             shape = 20, alpha = .5) + 
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") +
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Dry season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+
+plot_vedba_all<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_vedba_all, aes(x = x, y = y, 
+                                               fill = VeDBA_all)) +
+  geom_raster(data = predictions_vedba_all, aes(x = x, y = y, 
+                                                fill = VeDBA_all)) +
+  geom_contour(data = predictions_vedba_all, aes(x = x, y = y, 
+                                                 z = VeDBA_all), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  #geom_point(data = vedba, aes(x = x, y = y, size = mean_vedba_control),
+  #shape = 1, alpha = .4) + 
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") +
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Total VeDBA")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+```
+
+In @fig-VeDBA_map_A we can see the predicted landscape of VeDBA for rainy season. In @fig-VeDBA_map_B we can see the predicted landscape of VeDBA for dry season. Finally, @fig-VeDBA_map_C shows the predicted landscape of VeDBA for both rainy and dry seasons combined.
+
+```{r}
+#| label: fig-VeDBA_map_A
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape of VeDBA for rainy season across the area.
+#| fig-cap: |
+#|       Predicted landscape of VeDBA for rainy season across the area
+plot_vedba_wet
+```
+
+```{r}
+#| label: fig-VeDBA_map_B
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape of VeDBA for dry season across the area.
+#| fig-cap: |
+#|       Predicted landscape of VeDBA for dry season across the area
+plot_vedba_dry
+```
+
+```{r}
+#| label: fig-VeDBA_map_C
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape of VeDBA for both rainy and dry seasons combined across the area.
+#| fig-cap: |
+#|       Predicted landscape of total VeDBA (mean of VeDBA from all accelerometers in both rainy and dry seasons) across the area
+plot_vedba_all
+```
+
+# 3. Social landscape
+
+## 3.1 Distance to social border
+
+Similarly to the approach for computing a raster with the distances to fragment borders, I will now create a raster with distances to the frontier of the group's home range (used area) with the areas used by other groups. This border would thus represent a social border for the studied BLT group.
+
+1.  **Calculate distance from each point to the social border**
+
+Compute distances in meters
+
+-   This returns a matrix with 1 column (because `social_border_line` is one geometry), and one row per point.
+
+-   Convert to numeric:
+
+```{r}
+border_hr <- st_transform(border_hr, st_crs(points_inside_forest))
+distances_to_social_border <- as.numeric(st_distance(points_inside_forest, border_hr))
+
+# Add it to the sf object
+points_inside_forest$dist_s_b <- distances_to_social_border
+```
+
+**Now, convert points to raster again, now with distance to social border values**
+
+2.  **Convert the points to a `SpatVector`**
+
+```{r}
+# Convert sf to SpatVector
+points_vect <- vect(points_inside_forest)
+```
+
+3.  Rasterize the distance values
+
+```{r}
+# Rasterize using the dist_to_border attribute
+r_dist_social_border <- rasterize(points_vect, r_template, 
+                                  field = "dist_s_b")
+names(r_dist_social_border) <- "dist_s_b"
+```
+
+In @fig-dist_social_border we can see the raster created with 5m resolution of distance to social borders of the study group's used area, in meters.
+
+```{r}
+#| label: fig-dist_social_border
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the distances to social border across the area
+#| fig-cap: |
+#|       Raster with 5m resolution of distance to the frontier between BLT groups' used areas (social borders), in meters.
+#| warning: FALSE    
+plot(r_dist_social_border, col = pal(100))
+```
+
+## 3.2 Presence of co specifics
+
+First, I need to load the raster files with Utilization Distribution (UD) values for the two co specific groups that also use the fragment. This data was collected using [Axytrek mini data loggers from Technosmart](https://www.technosmart.eu/axy-trek-mini/). The devices were installed on two individuals per group and programmed to record the GPS location of the individuals every 10 minutes.
+
+```{r}
+library(terra)
+UDG2 <- rast("utilization_distribution_G2.tif")
+UDG3 <- rast("utilization_distribution_G3.tif")
+```
+
+I will use the borders of the fragment to mask the UD rasters and then sum the utilization distributions from the groups
+
+```{r}
+forest_vect <- vect(forest_borders)
+crs(UDG2) <- "EPSG:32722"
+crs(forest_vect) <- "EPSG:32722"
+crs(forest_vect) == crs(UDG2)
+
+# Mask the raster with UD for G2 and G3 with the borders of the fragment
+UDG2_masked <- mask(UDG2, forest_vect)
+UDG3_masked <- mask(UDG3, forest_vect)
+
+# For masked rasters
+UD_cons_r <- mosaic(UDG2_masked, UDG3_masked, fun = "sum")
+names(UD_cons_r) <- "UDcons"
+```
+
+Prepare the plot to inspect the UDs and movement
+
+```{r}
+# Convert raster to data frame
+UD_cons_r_df <- as.data.frame(UD_cons_r, xy = TRUE, na.rm = TRUE)
+
+plot_rainy_cons <- ggplot() +
+  # Raster layer
+  geom_raster(data = UD_cons_r_df, aes(x = x, y = y, fill = UDcons)) +
+  scale_fill_viridis_c(na.value = NA) +  
+  geom_point(data = df_r, aes(x = original_x, y = original_y),
+             color = "black", size = 1.5, alpha = .1) +
+  labs(title = "Rainy season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20))+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  coord_fixed()
+
+plot_dry_cons <- ggplot() +
+  # Raster layer
+  geom_raster(data = UD_cons_r_df, aes(x = x, y = y, fill = UDcons)) +
+  scale_fill_viridis_c(na.value = NA) +  
+  #geom_polygon(data = forest_guarei, aes(x = x, y = y),
+  #fill = "grey80", color = "black", size = 0.5) +
+  geom_point(data = df_d, aes(x = original_x, y = original_y),
+             color = "black", size = 1.5, alpha = .1) +
+  labs(title = "Dry season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20))+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  coord_fixed()
+```
+
+In @fig-cons_df_wet and @fig-cons_df_dry we can see the distribution of location points of the study BLT group together with the Utilization distribution values of co specific groups during rainy and dry seasons, respectively
+
+```{r}
+#| label: fig-cons_df_wet
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the movement of BLTs presence os cospecifics
+#| fig-cap: |
+#|       BLT relocations according to cospecifics' utilization distributions during rainy season
+plot_rainy_cons
+```
+
+```{r}
+#| label: fig-cons_df_dry
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the movement of BLTs presence os cospecifics
+#| fig-cap: |
+#|       BLT relocations according to cospecifics' utilization distributions during dry season
+plot_dry_cons
+```
+
+## 3.3 Number of long calls
+
+Using the same approach as for number of alarm calls, I will model the number of inter group long calls, a vocalization used for inter group communication and possibly territory demarcation, as a proxy for territoriality and presence of co specifics.
+
+```{r}
+levels(as.factor(adlib$behavior))
+lc_adlib <- adlib %>% 
+  dplyr::filter(behavior == ".LC_OUT") %>% 
+  dplyr::select(Season, date, time, behavior, x, y)
+
+lc_focal <- lc_focal_df %>% 
+  dplyr::filter(voca == ".LC_OUT") %>% 
+  dplyr::select(Season, date, time, behavior = voca, x, y)
+
+lc_df <- bind_rows(lc_adlib, lc_focal); head(lc_df)
+```
+
+I will create a grid of 15m by 15m cells
+
+```{r}
+# Convert the data frame to an sf object (for spatial operations)
+lc_sf <- st_as_sf(lc_df, coords = c("x", "y"), crs = 32722)
+
+lc_sf_w <- lc_sf %>% filter(lc_sf$Season == "rainy")
+lc_sf_d <- lc_sf %>% filter(lc_sf$Season == "dry")
+
+# Get the bounding box of the data
+bbox <- st_bbox(lc_sf)
+
+# Create a polygon from the bounding box
+bbox_sf <- st_sfc(st_polygon(list(matrix(c(bbox["xmin"], bbox["ymin"],
+                                           bbox["xmin"], bbox["ymax"],
+                                           bbox["xmax"], bbox["ymax"],
+                                           bbox["xmax"], bbox["ymin"],
+                                           bbox["xmin"], bbox["ymin"]),
+                                         ncol = 2, byrow = TRUE))),
+                  crs = st_crs(lc_sf))
+
+# Create the grid of 10m x 10m cells within the bounding box
+lc_grid <- st_make_grid(bbox_sf, cellsize = c(15, 15), what = "polygons")
+```
+
+In @fig-lc_grid we can see the distribution of long calls across the grid.
+
+```{r}
+#| label: fig-lc_grid
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the distribution of long calls across the grid
+#| fig-cap: |
+#|       Distribution of long calls across the grid for rainy (blue) and dry (red) seasons
+plot(st_geometry(lc_grid), col = "lightgrey", border = "white")
+plot(st_geometry(lc_sf_w), add = TRUE, pch = 16, col = "darkblue", cex = .5)
+plot(st_geometry(lc_sf_d), add = TRUE, pch = 16, col = "red", cex = .5)
+```
+
+Count the number of long calls per 15m by 15m cell
+
+```{r}
+# Step 1: Ensure both grid and points have the same CRS
+lc_grid <- st_transform(lc_grid, crs = st_crs(lc_sf))
+
+# Step 2: Calculate the center of each grid cell
+cell_centers <- st_centroid(lc_grid)
+
+# Step 3: Use st_intersects() to count points inside each grid cell
+point_count_w <- sapply(1:length(lc_grid), function(i) {
+  sum(st_intersects(lc_grid[i], lc_sf_w, sparse = FALSE))})
+
+point_count_d <- sapply(1:length(lc_grid), function(i) {
+  sum(st_intersects(lc_grid[i], lc_sf_d, sparse = FALSE))})
+
+# Step 4: Create a new data frame with central coordinates and point counts
+count_lc_w <- data.frame(x = st_coordinates(cell_centers)[, 1],
+                         y = st_coordinates(cell_centers)[, 2],
+                         point_count = point_count_w)
+
+count_lc_d <- data.frame(x = st_coordinates(cell_centers)[, 1],
+                         y = st_coordinates(cell_centers)[, 2],
+                         point_count = point_count_d)
+
+# View the summary of the point counts
+summary(count_lc_w$point_count)
+summary(count_lc_d$point_count)
+```
+
+### Model the number of long calls
+
+#### Rainy season:
+
+```{r}
+summary(mod_lc_w <- gam(point_count ~ s(x,y, k = 200, bs = "gp", m = 2),
+                        family = nb(),
+                        method = "REML",
+                        data = count_lc_w))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_lc_w)
+gam.check(mod_lc_w)
+```
+
+#### Dry season:
+
+```{r}
+summary(mod_lc_d <- gam(point_count ~ s(x,y, k = 200, bs = "gp", m = 2),
+                        family = nb(),
+                        method = "REML",
+                        data = count_lc_d))
+```
+
+Check the model
+
+```{r}
+plotQQunif(mod_lc_d)
+gam.check(mod_lc_d)
+```
+
+In @fig-nlc we can inspect the predicted landscape of number of long calls
+
+```{r}
+#| label: fig-nlc
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape of number of long calls
+#| fig-cap: |
+#|       Predicted landscape of number of long calls
+par(mfrow=c(1,2))
+vis.gam(mod_lc_w, view = c("x", "y"), plot.type = "contour",
+        contour.col = "blue", main = "Rainy season")
+vis.gam(mod_lc_d, view = c("x", "y"), plot.type = "contour",
+        contour.col = "blue", main = "Dry season")
+par(mfrow=c(1,1))
+```
+
+Extract predictions and store as SpatRaster
+
+```{r}
+grid_predictions_lc_w <- predict(mod_lc_w, newdata = grid, 
+                                 type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_n_lc_w <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  n_lc = (grid_predictions_lc_w$fit),
+  se.fit = grid_predictions_lc_w$se.fit)
+
+grid_predictions_lc_d <- predict(mod_lc_d, newdata = grid, 
+                                 type = "response", se.fit = TRUE)
+
+# Create a new data frame for plotting
+predictions_n_lc_d <- data.frame(
+  x = grid$x,
+  y = grid$y,
+  n_lc = (grid_predictions_lc_d$fit),
+  se.fit = grid_predictions_lc_d$se.fit)
+head(predictions_n_lc_d)
+
+### Convert predictions data frame to a SpatRaster
+n_lc_wet_r <- rast(predictions_n_lc_w, type = "xyz")
+n_lc_wet_r <- n_lc_wet_r[["n_lc"]]
+n_lc_dry_r <- rast(predictions_n_lc_d, type = "xyz")
+n_lc_dry_r <- n_lc_dry_r[["n_lc"]]
+```
+
+Prepare the plots to check predicted landscapes of long calls across the area for both seasons
+
+```{r}
+plot_n_lc_w<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_n_lc_w, aes(x = x, y = y, 
+                                            fill = n_lc)) +
+  geom_raster(data = predictions_n_lc_w, aes(x = x, y = y, 
+                                             fill = n_lc)) +
+  geom_contour(data = predictions_n_lc_w, aes(x = x, y = y, 
+                                              z = n_lc), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  #geom_polygon(data = out_hr_df, aes(x = X, y = Y),
+  #fill = "grey80", size = 0.5)+
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Rainy season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+
+plot_n_lc_d<-ggplot() +
+  geom_polygon(data = forest_guarei, aes(x = x, y = y),
+               fill = "grey80", size = 0.5) +
+  geom_point(data = predictions_n_lc_d, aes(x = x, y = y, 
+                                            fill = n_lc)) +
+  geom_raster(data = predictions_n_lc_d, aes(x = x, y = y, 
+                                             fill = n_lc)) +
+  geom_contour(data = predictions_n_lc_d, aes(x = x, y = y, 
+                                              z = n_lc), 
+               color = "white") +
+  geom_sf(data = forest_mask, inherit.aes = FALSE, fill = "white", 
+          color = "white") +
+  #geom_polygon(data = out_hr_df, aes(x = X, y = Y),
+  #fill = "grey80", size = 0.5)+
+  scale_fill_gradient(low = "#d0d4d3", high = "#4f7160") + 
+  theme(axis.text.x = element_text(hjust=0.5, size = 8, colour ="Black"))+
+  theme(axis.text.y = element_text(angle=90, hjust=0.5,
+                                   size = 8, colour ="Black"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  labs(title = "Dry season")+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=20),
+        legend.position = "bottom",
+        legend.title = element_blank())
+```
+
+In @fig-nlc_map we can see the predicted landscapes of long calls across the area for both seasons.
+
+```{r}
+#| label: fig-nlc_map
+#| fig-width: 5
+#| fig-asp: 1
+#| fig-alt: |
+#|   A plot showing the predicted landscape of number of long calls across the area for both seasons
+#| fig-cap: |
+#|       Predicted landscape of number of long calls across the area for both seasons
+grid.arrange(plot_n_lc_w, plot_n_lc_d, ncol = 2)
+```
+
+# 4. Save the data for further use in *i*SSF models
+
+Now that all possible predictors have been modeled and landscapes have been created, I will save them to use in the *i*SSF models.
+
+```{r}
+# Save the data frame
+save(df, file = "2_3_data_SSF_BLT_2025_07_d02.rda")
+
+# Save all rasters sepparately
+# Combine all rasters into a named list
+rasters <- list(
+  r_dist_to_border     = r_dist_to_border,
+  nt_bot_r             = nt_bot_r,
+  rch_1                = rch_1,
+  nft_bot_dry_r        = nft_bot_dry_r,
+  nvft_dry_r           = nvft_dry_r,
+  KJ_bot_dry_r         = KJ_bot_dry_r,
+  KJ_vft_dry_r         = KJ_vft_dry_r,
+  inv_bio_dry_r        = inv_bio_dry_r,
+  n_alarm_dry_r        = n_alarm_dry_r,
+  vedba_dry_r          = vedba_dry_r,
+  nft_bot_wet_r        = nft_bot_wet_r,
+  nvft_wet_r           = nvft_wet_r,
+  KJ_bot_wet_r         = KJ_bot_wet_r,
+  KJ_vft_wet_r         = KJ_vft_wet_r,
+  vedba_wet_r          = vedba_wet_r,
+  vedba_all_r          = vedba_all_r,
+  r_dist_social_border = r_dist_social_border,
+  UD_cons_r            = UD_cons_r,
+  n_lc_dry_r           = n_lc_dry_r,
+  n_lc_wet_r           = n_lc_wet_r
+)
+
+# Create output folder if it doesn't exist
+dir.create("rasters", showWarnings = FALSE)
+
+# Save all rasters to disk
+for (name in names(rasters)) {
+  writeRaster(rasters[[name]],
+              filename = paste0("rasters/", name, ".tif"),
+              overwrite = TRUE)
+}
+```
+
+### 5. References

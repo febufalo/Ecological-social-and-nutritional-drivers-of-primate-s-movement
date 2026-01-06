@@ -1,0 +1,2077 @@
+---
+title: "Integrated Step Selection Function Models applied to the black lion tamarin - scan movement data"
+format: pdf
+editor: visual
+authors: 
+  - name: Felipe Bufalo
+  - name: Rodrigo Gonçalves Amaral
+  - name: Gabriel Pavan Sabino
+  - name: Luca Börger
+  - name: Laurence Culot
+bibliography: references.bib
+---
+
+# Introduction
+
+In this script I will use the environmental, energetic, and social landscapes predicted previously to fit *i*SSF models to investigate what factors are associated with black lion tamarins' (*Leontopithecus chrysopygus -* BLTs) route-planning processes of where and when to move to in a 100 ha seasonal Atlantic Forest Fragment in the municipality of Guareí, in São Paulo, Brazil.
+
+## Loading packages
+
+```{r}
+#| output: FALSE
+#| echo: TRUE
+library(amt)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(tidyr)
+library(terra)
+```
+
+## Loading data
+
+```{r}
+load("2_3_data_SSF_BLT_2025_07_d02.rda")
+
+# List all .tif files in the "rasters" folder
+raster_files <- list.files("rasters", pattern = "\\.tif$", full.names = TRUE)
+
+# Loop to load and assign each raster as an individual object
+for (file in raster_files) {
+  var_name <- tools::file_path_sans_ext(basename(file))
+  assign(var_name, rast(file), envir = .GlobalEnv)
+}
+```
+
+# 1. Create SSF object
+
+Now that all possible predictors have been modeled and landscapes have been created, I can create my ssf object.
+
+I will use steps with 15 minutes of interval between relocations. Also, I will generate 100 random steps for each observed step. Predictor values will be extracted for both start and end locations of each step (observed and random).
+
+I will create one object for the rainy season (ssf_wet) and another for the dry season (ssf_dry).
+
+```{r}
+dat <- df
+names(dat)
+dat <- dat[,-c(1,2,11:14, 17:18)]
+dat <- dat %>%
+  rename(x = original_x, y = original_y) %>% 
+  filter(id == "group")
+dat$x <- as.numeric(dat$x)
+dat$y <- as.numeric(dat$y)
+head(dat)
+
+# Check if all observations are complete
+all(complete.cases(dat)) # no action required
+
+# Parse date and time and create time stamps
+dat$ts <- as.POSIXct(paste(dat$date, dat$time),
+                    format="%d/%m/%y %H:%M:%S",
+                    tz = "Etc/GMT+3")
+
+tr <- make_track(dat, x, y, ts, id = id, 
+                 behavior = behavior, season = season,
+                 crs = 32722)
+
+ssf_wet <- tr %>% 
+  filter(season == "wet") %>% 
+  track_resample(rate = minutes(15), tolerance = seconds(10)) %>% 
+  steps_by_burst() %>% 
+  random_steps(n_control = 100) %>% 
+  extract_covariates(r_dist_to_border, where = "both") %>% 
+  extract_covariates(nt_bot_r, where = "both") %>% 
+  extract_covariates(rch_1, where = "both") %>%
+  extract_covariates(nft_bot_wet_r, where = "both") %>% 
+  extract_covariates(nvft_wet_r, where = "both") %>% 
+  extract_covariates(KJ_bot_wet_r, where = "both") %>% 
+  extract_covariates(KJ_vft_wet_r, where = "both") %>% 
+  extract_covariates(vedba_wet_r, where = "both") %>% 
+  extract_covariates(vedba_all_r, where = "both") %>% 
+  extract_covariates(r_dist_social_border, where = "both") %>% 
+  extract_covariates(UD_cons_r, where = "both") %>%
+  extract_covariates(n_lc_wet_r, where = "both") %>% 
+  mutate(dist_f_b_start = scale(dist_f_b_start),
+         dist_f_b_end = scale(dist_f_b_end),
+         nt_bot_start = scale(nt_bot_start), 
+         nt_bot_end = scale(nt_bot_end),
+         tree_H_start  = scale(tree_H_start),
+         tree_H_end = scale(tree_H_end),
+         nft_bot_start = scale(nft_bot_start),
+         nft_bot_end = scale(nft_bot_end),
+         n_vft_start = scale(n_vft_start),
+         n_vft_end = scale(n_vft_end),
+         KJ_bot_start = scale(KJ_bot_start),
+         KJ_bot_end = scale(KJ_bot_end),
+         KJ_vft_start = scale(KJ_vft_start),
+         KJ_vft_end = scale(KJ_vft_end),
+         VeDBA_start = scale(VeDBA_start),
+         VeDBA_end = scale(VeDBA_end),
+         VeDBA_all_start = scale(VeDBA_all_start),
+         VeDBA_all_end = scale(VeDBA_all_end),
+         dist_s_b_start = scale(dist_s_b_start),
+         dist_s_b_end = scale(dist_s_b_end),
+         UDcons_start = scale(UDcons_start),
+         UDcons_end = scale(UDcons_end),
+         n_lc_start = scale(n_lc_start),
+         n_lc_end = scale(n_lc_end),
+         cos_ta_ = cos(ta_), 
+         log_sl_ = log(sl_)
+  ) %>% 
+  filter(!is.na(ta_))
+names(ssf_wet)
+
+ssf_dry <- tr %>% 
+  filter(season == "dry") %>% 
+  track_resample(rate = minutes(15), tolerance = seconds(10)) %>% 
+  steps_by_burst() %>% 
+  random_steps(n_control = 100) %>% 
+  extract_covariates(r_dist_to_border, where = "both") %>% 
+  extract_covariates(nt_bot_r, where = "both") %>% 
+  extract_covariates(rch_1, where = "both") %>%
+  extract_covariates(nft_bot_dry_r, where = "both") %>% 
+  extract_covariates(nvft_dry_r, where = "both") %>% 
+  extract_covariates(KJ_bot_dry_r, where = "both") %>% 
+  extract_covariates(KJ_vft_dry_r, where = "both") %>% 
+  extract_covariates(inv_bio_dry_r, where = "both") %>% 
+  extract_covariates(n_alarm_dry_r, where = "both") %>% 
+  extract_covariates(vedba_dry_r, where = "both") %>% 
+  extract_covariates(r_dist_social_border, where = "both") %>% 
+  extract_covariates(UD_cons_r, where = "both") %>%
+  extract_covariates(n_lc_dry_r, where = "both") %>% 
+  mutate(dist_f_b_start = scale(dist_f_b_start),
+         dist_f_b_end = scale(dist_f_b_end),
+         nt_bot_start = scale(nt_bot_start), 
+         nt_bot_end = scale(nt_bot_end),
+         tree_H_start  = scale(tree_H_start),
+         tree_H_end = scale(tree_H_end),
+         nft_bot_start = scale(nft_bot_start),
+         nft_bot_end = scale(nft_bot_end),
+         n_vft_start = scale(n_vft_start),
+         n_vft_end = scale(n_vft_end),
+         KJ_bot_start = scale(KJ_bot_start),
+         KJ_bot_end = scale(KJ_bot_end),
+         KJ_vft_start = scale(KJ_vft_start),
+         KJ_vft_end = scale(KJ_vft_end),
+         inv_bio_start = scale(inv_bio_start),
+         inv_bio_end = scale(inv_bio_end),
+         n_alarm_start = scale(n_alarm_start),
+         n_alarm_end = scale(n_alarm_end),
+         VeDBA_start = scale(VeDBA_start),
+         VeDBA_end = scale(VeDBA_end),
+         dist_s_b_start = scale(dist_s_b_start),
+         dist_s_b_end = scale(dist_s_b_end),
+         UDcons_start = scale(UDcons_start),
+         UDcons_end = scale(UDcons_end),
+         n_lc_start = scale(n_lc_start),
+         n_lc_end = scale(n_lc_end),
+         cos_ta_ = cos(ta_), 
+         log_sl_ = log(sl_)
+  ) %>% 
+  filter(!is.na(ta_))
+names(ssf_dry)
+```
+
+Make a few adjustments in the data
+
+```{r}
+#| warning: false
+ssf_wet <- ssf_wet %>% filter(!is.na(n_vft_end))
+ssf_dry <- ssf_dry %>% filter(!is.na(tree_H_end))
+ssf_wet$UDcons_end[is.na(ssf_wet$UDcons_end)] <- 0
+ssf_wet$tree_H_end[is.na(ssf_wet$tree_H_end)] <- 0
+ssf_wet$dist_f_b_end[is.na(ssf_wet$dist_f_b_end)] <- 0
+ssf_wet$dist_s_b_end[is.na(ssf_wet$dist_s_b_end)] <- 0
+ssf_dry$dist_f_b_end[is.na(ssf_dry$dist_f_b_end)] <- 0
+ssf_dry$dist_s_b_end[is.na(ssf_dry$dist_s_b_end)] <- 0
+ssf_dry$UDcons_end[is.na(ssf_dry$UDcons_end)] <- 0
+```
+
+# 2. Check SSF covariates
+
+Check for colinearity between covariates
+
+```{r}
+columns_of_interest_wet <- ssf_wet[,c(13:36,6,7,37,38)]
+columns_of_interest_dry <- ssf_dry[,c(13:38,6,7,39,40)]
+# Convert to data frame if necessary
+columns_of_interest_wet <- as.data.frame(columns_of_interest_wet)
+columns_of_interest_dry <- as.data.frame(columns_of_interest_dry)
+# Perform correlation test
+correlation_matrix_wet <- cor(columns_of_interest_wet)
+correlation_matrix_dry <- cor(columns_of_interest_dry)
+# Convert correlation matrix to long format
+correlation_long_wet <- as.data.frame(as.table(correlation_matrix_wet))
+names(correlation_long_wet) <- c("Var1", "Var2", "Correlation")
+correlation_long_dry <- as.data.frame(as.table(correlation_matrix_dry))
+names(correlation_long_dry) <- c("Var1", "Var2", "Correlation")
+```
+
+In @fig-corplot_wet we can see the correlation between all covariates in ssf object in the rainy season
+
+```{r}
+#| label: fig-corplot_wet
+#| fig-width: 7
+#| fig-height: 6
+#| fig-alt: |
+#|   A plot showing the correlation between all covariates in ssf_wet
+#| fig-cap: |
+#|       Correlation between all covariates in ssf_wet
+#| warning: FALSE     
+ggplot(correlation_long_wet, aes(Var1, Var2, fill = Correlation)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(Correlation, 2)), color = "black", size = 1.8) +  
+  scale_fill_gradient2(low = "#565656", mid = "white", high = "#4f7160", 
+                       midpoint = 0, 
+                       limits = c(-1, 1), name = "Correlation") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        plot.title = element_text(hjust = 0.5))+
+  labs(title = "Correlation Heatmap - rainy season")+
+  xlab("")+
+  ylab("")+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=16),
+        legend.title = element_blank())
+```
+
+In @fig-corplot_dry we can see the correlation between all covariates in ssf object in the dry season
+
+```{r}
+#| label: fig-corplot_dry 
+#| fig-width: 7
+#| fig-height: 6
+#| fig-alt: |
+#|   A plot showing the correlation between all covariates in ssf_dry
+#| fig-cap: |
+#|       Correlation between all covariates in ssf object for dry season
+#| warning: FALSE     
+ggplot(correlation_long_dry, aes(Var1, Var2, fill = Correlation)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(Correlation, 2)), color = "black", size = 1.8) +  
+  scale_fill_gradient2(low = "#565656", mid = "white", high = "#4f7160", 
+                       midpoint = 0, 
+                       limits = c(-1, 1), name = "Correlation") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        plot.title = element_text(hjust = 0.5))+
+  labs(title = "Correlation Heatmap - dry season")+
+  xlab("")+
+  ylab("")+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA, size=2))+
+  theme(plot.title = element_text(hjust = 0.5),
+        title=element_text(size=16),
+        legend.title = element_blank())
+```
+
+### Translating the names used for covariates:
+
+Each covariate has the extracted values for the start and end of each of the observed and randomly generated steps.
+
+| Covariate | Description |
+|------------------------------------|------------------------------------|
+| `dist_f_b` | Distance to fragment edge (i.e., limits of the forest fragment), in meters. |
+| `nt_bot` | Number of trees, computed through vegetation plots. |
+| `tree_H` | Canopy height (in meters), extracted from a 1 m resolution raster available from [@tolan2024]. |
+| `nft_bot` | Number of fruit-feeding trees, computed through vegetation plots and behavior data. |
+| `n_vft` | Number of fruit-feeding trees, computed through behavior data. |
+| `KJ_bot` | Fruit energetic content (KJ), computed through vegetation plots, behavior data, and fruit chemical content. |
+| `KJ_vft` | Fruit energetic content (KJ), computed through behavior data and fruit chemical content. |
+| `dist_s_b` | Distance to the border of the 95% AKDEc estimation of the used area of the BLT study group, in meters - social border. |
+| `UDcons` | Summed probability of conspecific Utilization Densities, computed using [Axytrek mini dataloggers from Technosmart](https://www.technosmart.eu/axy-trek-mini/) installed on two individuals from each of the three groups in the area. |
+| `n_lc` | Number of inter group long calls, computed through behavior data. |
+| `inv_bio` | Invertebrate biomass (in grams), computed through pitfall trap experiments. |
+| `n_alarm` | Number of alarm calls, computed through behavior data. |
+| `VeDBA` | Average Vectorial Dynamic Body Acceleration for each coordinate, computed using accelerometer data in [Axytrek mini dataloggers from Technosmart](https://www.technosmart.eu/axy-trek-mini/) for each season. |
+| `VeDBA_all` | Average Vectorial Dynamic Body Acceleration for each coordinate, computed using accelerometer data in [Axytrek mini dataloggers from Technosmart](https://www.technosmart.eu/axy-trek-mini/) across both seasons. Used just for modeling rainy season. |
+| `sl_` | Tentative step length, computed by the `amt` package using a gamma distribution. |
+| `ta_` | Tentative turn angle, computed by the `amt` package using a von Mises distribution. |
+| `log_sl_` | Log of tentative step length. |
+| `cos_ta_` | Cosine of tentative turn angle. |
+
+# 3. *i*SSF models
+
+## 3.1 Rainy season - model fit
+
+I will fit models with interactions with movement parameters (*sl\_*, *log_sl\_*, *ta\_* and *cos_ta\_*) and and without the interactions
+
+### 3.1.1 Forest structure model
+
+```{r}
+frst_st_model_int_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ dist_f_b_end + nt_bot_end + tree_H_end +  
+               sl_ + log_sl_ + cos_ta_ + 
+               dist_f_b_start:(sl_ + log_sl_ + cos_ta_) +
+               nt_bot_start:(sl_ + log_sl_ + cos_ta_) +
+               tree_H_start:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+frst_st_model_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ dist_f_b_end + nt_bot_end + tree_H_end + sl_ + log_sl_ + cos_ta_ + 
+               strata(step_id_), model=TRUE)
+
+```
+
+### 3.1.2 Fruits model
+
+```{r}
+fruits_bot_model_int_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ nft_bot_end + KJ_bot_end + 
+               sl_ + log_sl_ + cos_ta_ + 
+               KJ_bot_start:(sl_ + log_sl_ + cos_ta_) +
+               nft_bot_start:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+fruits_bot_model_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ nft_bot_end + KJ_bot_end +
+               sl_ + log_sl_ + cos_ta_ + strata(step_id_), 
+             model=TRUE)
+
+fruits_vis_model_int_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ n_vft_end + KJ_vft_end + 
+               sl_ + log_sl_ + cos_ta_ + 
+               KJ_vft_start:(sl_ + log_sl_ + cos_ta_) +
+               n_vft_start:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+fruits_vis_model_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ n_vft_end + KJ_vft_end + 
+               sl_ + log_sl_ + cos_ta_ + strata(step_id_), 
+             model=TRUE)
+```
+
+### 3.1.3 VeDBA model
+
+```{r}
+vedba_model_int_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ VeDBA_end + sl_ + log_sl_ + cos_ta_ + 
+               VeDBA_start:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+vedbaall_model_int_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ VeDBA_all_end + sl_ + log_sl_ + cos_ta_ + 
+               VeDBA_all_start:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+vedba_model_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ VeDBA_end + sl_ + log_sl_ + cos_ta_ + 
+               strata(step_id_), 
+             model=TRUE)
+
+vedbaall_model_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ VeDBA_all_end + sl_ + log_sl_ + cos_ta_ + 
+               strata(step_id_), 
+             model=TRUE)
+```
+
+### 3.1.4 Social model
+
+```{r}
+conspecifics_model_int_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ UDcons_end + n_lc_end + sl_ + log_sl_ + cos_ta_ + 
+               UDcons_start:(sl_ + log_sl_ + cos_ta_) +
+               n_lc_end:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+conspecifics_model_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ UDcons_end + n_lc_end + sl_ + log_sl_ + cos_ta_ +
+               strata(step_id_), model=TRUE)
+
+social_border_model_int_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ dist_f_b_end + n_lc_end + sl_ + log_sl_ + cos_ta_ + 
+               dist_f_b_start:(sl_ + log_sl_ + cos_ta_) +
+               n_lc_end:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+social_border_model_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ dist_f_b_end + n_lc_end + sl_ + log_sl_ + cos_ta_ +
+               strata(step_id_), model=TRUE)
+```
+
+### 3.1.5 Null model
+
+```{r}
+null_model_wet <- ssf_wet %>% 
+  fit_clogit(case_ ~ 1 + sl_ + log_sl_ + cos_ta_ + strata(step_id_), 
+             model=TRUE)
+
+```
+
+### 3.1.6 Compare models
+
+```{r}
+conspecifics_model_int_wet_aic <- AIC(conspecifics_model_int_wet)
+conspecifics_model_wet_aic <- AIC(conspecifics_model_wet)
+fruits_bot_model_int_wet_aic <- AIC(fruits_bot_model_int_wet)
+fruits_bot_model_wet_aic <- AIC(fruits_bot_model_wet)
+fruits_vis_model_int_wet_aic <- AIC(fruits_vis_model_int_wet)
+fruits_vis_model_wet_aic <- AIC(fruits_vis_model_int_wet)
+frst_st_model_int_wet_aic <- AIC(frst_st_model_int_wet)
+frst_st_model_wet_aic <- AIC(frst_st_model_wet)
+vedba_model_int_wet_aic <- AIC(vedba_model_int_wet)
+vedbaall_model_int_wet_aic <- AIC(vedbaall_model_int_wet)
+vedba_model_wet_aic <- AIC(vedba_model_wet)
+vedbaall_model_wet_aic <- AIC(vedbaall_model_wet)
+social_border_model_int_wet_aic <- AIC(social_border_model_int_wet)
+social_border_model_wet_aic <- AIC(social_border_model_wet)
+null_model_wet_aic <- AIC(null_model_wet)
+
+# Compare AIC values
+aic_table_wet <- data.frame(Model = c("conspecifics_model_int_wet", 
+                                      "conspecifics_model_wet", 
+                                      "fruits_bot_model_int_wet", 
+                                      "fruits_bot_model_wet",
+                                      "fruits_vis_model_int_wet",
+                                      "fruits_vis_model_wet",
+                                      "frst_st_model_int_wet",
+                                      "frst_st_model_wet", 
+                                      "vedba_model_int_wet",
+                                      "vedbaall_model_int_wet",
+                                      "vedba_model_wet",
+                                      "vedbaall_model_wet",
+                                      "social_border_model_int_wet",
+                                      "social_border_model_wet",
+                                      "null_model_wet"),
+                            AIC_Value = c(conspecifics_model_int_wet_aic, 
+                                          conspecifics_model_wet_aic,
+                                          fruits_bot_model_int_wet_aic,
+                                          fruits_bot_model_wet_aic, 
+                                          fruits_vis_model_int_wet_aic,
+                                          fruits_vis_model_wet_aic,
+                                          frst_st_model_int_wet_aic,
+                                          frst_st_model_wet_aic, 
+                                          vedba_model_int_wet_aic,
+                                          vedbaall_model_int_wet_aic,
+                                          vedba_model_wet_aic,
+                                          vedbaall_model_wet_aic,
+                                          social_border_model_int_wet_aic,
+                                          social_border_model_wet_aic,
+                                          null_model_wet_aic))
+
+# Find the index of the best model (i.e., the model with the lowest AIC value)
+best_model_index_wet <- which.min(aic_table_wet$AIC_Value)
+# Subtract lowest AIC_value from all the rest to create a delta_AIC column
+aic_table_wet$delta_AIC<-aic_table_wet$AIC_Value-min(aic_table_wet$AIC_Value)
+# Sort the AIC table by AIC values in increasing order
+aic_table_sorted_wet <- aic_table_wet[order(aic_table_wet$AIC_Value), ]
+print(aic_table_sorted_wet)
+```
+
+I can see that *vedba_model_wet*, *vedbaall_model_wet*, and *fruits_bot_model_wet*, are worse or equal to *null_model*.
+
+Best model is *fruits_vis_model_int_wet*:
+
+```{r}
+summary(fruits_vis_model_int_wet)
+```
+
+Inspect other models better than null:
+
+```{r}
+summary(fruits_vis_model_wet) 
+summary(conspecifics_model_int_wet) 
+summary(conspecifics_model_wet) 
+summary(social_border_model_wet)
+summary(frst_st_model_wet)
+summary(social_border_model_int_wet)
+summary(fruits_bot_model_int_wet)
+summary(frst_st_model_int_wet)
+summary(vedbaall_model_int_wet)
+summary(vedba_model_int_wet)
+```
+
+From the outputs of the models, I will fit more complex models with covariates and interactions so I can choose best model again
+
+```{r}
+summary(full_wet_1 <- ssf_wet %>% 
+  fit_clogit(case_ ~ n_vft_end + KJ_vft_end + tree_H_end + 
+               n_lc_end + VeDBA_all_end + sl_ + log_sl_ + cos_ta_ + 
+               n_vft_start:(sl_ + log_sl_ + cos_ta_) + 
+               KJ_vft_start:(sl_ + log_sl_ + cos_ta_) +
+               tree_H_start:(sl_ + log_sl_ + cos_ta_) +
+               n_lc_start:(sl_ + log_sl_ + cos_ta_) +
+               VeDBA_all_start:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), 
+             model=TRUE))
+
+summary(full_wet_2 <- ssf_wet %>% 
+          fit_clogit(case_ ~ n_vft_end + tree_H_end +  
+                       n_lc_end + VeDBA_all_end + sl_ + log_sl_ + cos_ta_ + 
+                       n_vft_start:(sl_ + log_sl_ + cos_ta_) + 
+                       tree_H_start:(sl_ + log_sl_ + cos_ta_) + 
+                       n_lc_start:(sl_ + log_sl_ + cos_ta_) +
+                       VeDBA_all_start:(sl_ + log_sl_ + cos_ta_) +
+                       strata(step_id_), 
+                     model=TRUE))
+
+AIC(full_wet_1)
+AIC(full_wet_2)
+```
+
+Model *full_wet_2* is simpler and statistically equal to *full_wet_1*. I will use *full_wet_2* for further analyses.
+
+### 3.1.7 Check tentative vs updated movement parameters
+
+#### 3.1.7.1 Step lengths
+
+```{r}
+updated_sl <- update_sl_distr(full_wet_2)
+# data.frame for plotting
+plot_sl <- data.frame(x = rep(NA, 100))
+
+# x-axis is sequence of possible step lengths
+plot_sl$x <- seq(from = 0, to = 400, length.out = 100)
+
+# y-axis is the probability density under the given gamma distribution
+# For the tentative distribution
+plot_sl$tentative <- dgamma(
+  x = plot_sl$x, 
+  shape = full_wet_2$sl_$params$shape,
+  scale = full_wet_2$sl_$params$scale)
+
+# For the updated distribution
+plot_sl$updated <- dgamma(
+  x = plot_sl$x,
+  shape = updated_sl$params$shape,
+  scale = updated_sl$params$scale)
+
+# Pivot from wide data to long data
+plot_sl <- plot_sl %>% 
+  pivot_longer(cols = -x)
+```
+
+In @fig-sl_wet we can see that there is not much variation between tentative and updated step lengths. This was expected since our model did not find significance for *sl\_*.
+
+```{r}
+#| label: fig-sl_wet 
+#| fig-width: 5
+#| fig-asp: 1 
+#| fig-alt: |
+#|   A plot showing tentative and updated step lengths
+#| fig-cap: |
+#|       Comparison between tentative and updated step lengths based on model full_wet_2
+#| warning: FALSE  
+ggplot(plot_sl, aes(x = x, y = value, color = factor(name))) +
+  geom_line(linewidth = 1) +
+  xlab("Step Length (m)") +
+  ylab("Probability Density") +
+  scale_color_manual(name = "Distribution", 
+                     breaks = c("tentative", "updated"),
+                     values = c("blue", "orange")) +
+  theme_bw()
+```
+
+#### 3.1.7.2 Turn angles
+
+```{r}
+#| warning: FALSE
+updated_ta <- update_ta_distr(full_wet_2)
+
+# data.frame for plotting
+plot_ta <- data.frame(x = rep(NA, 100))
+
+# x-axis is sequence of possible step lengths
+plot_ta$x <- seq(from = -1 * pi, to = pi, length.out = 100)
+
+# y-axis is the probability density under the given von Mises distribution
+# For the tentative distribution
+plot_ta$tentative <- circular::dvonmises(
+  x = plot_ta$x, 
+  mu = full_wet_2$ta_$params$mu,
+  kappa = full_wet_2$ta_$params$kappa)
+
+# For the updated distribution
+plot_ta$updated <- circular::dvonmises(
+  x = plot_ta$x, 
+  mu = updated_ta$params$mu,
+  kappa = updated_ta$params$kappa)
+
+# Pivot from wide data to long data
+plot_ta <- plot_ta %>% 
+  pivot_longer(cols = -x)
+```
+
+As in @fig-sl_wet, in @fig-ta_wet we can see that there is not much variation between tentative and updated turn angles. This was expected since our model did not find significance for *ta\_*.
+
+```{r}
+#| label: fig-ta_wet 
+#| fig-width: 5
+#| fig-asp: 1 
+#| fig-alt: |
+#|   A plot showing tentative and updated turn angles
+#| fig-cap: |
+#|       Comparison between tentative and updated turn angles based on model full_wet_2
+#| warning: FALSE  
+ggplot(plot_ta, aes(x = x, y = value, color = factor(name))) +
+  geom_line(size = 1) +
+  coord_cartesian(ylim = c(0, 0.25)) +
+  xlab("Relative Turn Angle (radians)") +
+  ylab("Probability Density") +
+  scale_x_continuous(breaks = c(-pi, -pi/2, 0, pi/2, pi),
+                     labels = c(expression(-pi, -pi/2, 0, pi/2, pi))) +
+  scale_color_manual(name = "Distribution", 
+                     breaks = c("tentative", "updated"),
+                     values = c("blue", "orange")) +
+theme_bw()
+```
+
+### 3.1.8 Calculate Relative selection strengths
+
+To calculate the relative selection strengths for the covariates included in *full_wet_2*, I will create a series of data frames with medium, maximum and minimum values for each of the covariates in *full_wet_2*.
+
+```{r}
+# n_vft_end
+s1 <- data.frame(
+  n_vft_end = seq(from = -2, to = 2, length.out = 200),
+  tree_H_end = 0,
+  n_lc_end = 0,
+  VeDBA_all_end = 0,
+  n_vft_start = 0,
+  tree_H_start = 0,
+  n_lc_start = 0,
+  VeDBA_all_start = 0,
+  sl_ = median(ssf_wet$sl_),
+  log_sl_ = log(median(ssf_wet$sl_)),
+  cos_ta_ = median(ssf_wet$cos_ta_))
+
+# data.frame for s2 -> all average
+s2 <- data.frame(
+  n_vft_end = 0,
+  tree_H_end = 0,
+  n_lc_end = 0,
+  VeDBA_all_end = 0,
+  n_vft_start = 0,
+  tree_H_start = 0,
+  n_lc_start = 0,
+  VeDBA_all_start = 0,
+  sl_ = median(ssf_wet$sl_),
+  log_sl_ = log(median(ssf_wet$sl_)),
+  cos_ta_ = median(ssf_wet$cos_ta_))
+
+# Calculate log-RSS with Bootstrap Confidence Intervals
+lr1 <- log_rss(full_wet_2, s1, s2, ci = "se", ci_level = 0.95)
+foo <- lr1
+n_vft_wet_df <- lr1$df
+
+# tree_H 
+s3 <- data.frame(
+  n_vft_end = 0,
+  tree_H_end = seq(from = -2, to = 2, length.out = 200),
+  n_lc_end = 0,
+  VeDBA_all_end = 0,
+  n_vft_start = 0,
+  tree_H_start = 0,
+  n_lc_start = 0,
+  VeDBA_all_start = 0,
+  sl_ = median(ssf_wet$sl_),
+  log_sl_ = log(median(ssf_wet$sl_)),
+  cos_ta_ = median(ssf_wet$cos_ta_))
+
+lr2 <- log_rss(full_wet_2, s3, s2, ci = "se", ci_level = 0.95)
+tree_H_wet_df <- lr2$df
+
+# n_lc
+s4 <- data.frame(
+  n_vft_end = 0,
+  tree_H_end = 0,
+  n_lc_end = seq(from = -2, to = 2, length.out = 200),
+  VeDBA_all_end = 0,
+  n_vft_start = 0,
+  tree_H_start = 0,
+  n_lc_start = 0,
+  VeDBA_all_start = 0,
+  sl_ = median(ssf_wet$sl_),
+  log_sl_ = log(median(ssf_wet$sl_)),
+  cos_ta_ = median(ssf_wet$cos_ta_))
+
+lr3 <- log_rss(full_wet_2, s4, s2, ci = "se", ci_level = 0.95)
+n_lc_wet_df <- lr3$df
+
+### I will save the data frames with errors for the thesis
+df1 <- n_vft_wet_df %>%
+  transmute(x = n_vft_end_x1, log_rss, lwr, upr,
+            variable = "#Known fruiting trees")
+
+df2 <- tree_H_wet_df %>%
+  transmute(x = tree_H_end_x1, log_rss, lwr, upr,
+            variable = "Canopy height (m)")
+
+df3 <- n_lc_wet_df %>%
+  transmute(x = n_lc_end_x1, log_rss, lwr, upr,
+            variable = "Log(#Long calls)")
+
+
+# ---- Combine data ----
+combined_df <- bind_rows(df1, df2, df3)
+
+# ---- Colors ----
+curve_colors <- c("#Known fruiting trees" = "burlywood",
+                  "Canopy height (m)" = "chocolate4", 
+                  "Log(#Long calls)" = "antiquewhite4")
+
+```
+
+Now, in @fig-habitat_wet we can see that there is a positive selection for all three significant covariates selected in model *full_wet_2*.
+
+```{r}
+#| label: fig-habitat_wet 
+#| fig-width: 5
+#| fig-asp: 1 
+#| fig-alt: |
+#|   A plot showing selection strengths for n_vft, tree_H and n_lc
+#| fig-cap: |
+#|       Selection strengths for significant covariates in model full_wet_2
+#| warning: FALSE  
+p1 <- ggplot(combined_df, aes(x = x, y = exp(log_rss), 
+                              color = variable, fill = variable)) +
+  geom_ribbon(aes(ymin = exp(lwr), ymax = exp(upr)), alpha = 0.2, color = NA) +
+  geom_line(size = 1.2) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray30") +
+  scale_color_manual(values = curve_colors) +
+  scale_fill_manual(values = curve_colors) +
+  labs(x = "Predictor (SD)", y = "Log-RSS vs Mean predictor", color = "", fill = "") +
+  theme_classic() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio = 1,
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size = 20),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 18),
+        strip.text = element_text(size = 12),
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0))
+p1
+```
+
+### 3.1.9 Interaction between movement and covariates
+
+As in relative selection strengths, I will create a series of data frames with different values for each covariate.
+
+#### 3.1.9.1 Number of visited feeding trees vs movement parameters
+
+##### 3.1.9.1.1 *n_vft* vs *ta\_*
+
+```{r}
+#| warning: FALSE
+low_ta_n_vft <- update_vonmises(
+  dist = full_wet_2$ta_,
+  beta_cos_ta = full_wet_2$model$coefficients["cos_ta_"] +
+    -2 * full_wet_2$model$coefficients["cos_ta_:n_vft_start"])
+
+# med turn-angle distribution
+med_ta_n_vft <- update_vonmises(
+  dist = full_wet_2$ta_,
+  beta_cos_ta = full_wet_2$model$coefficients["cos_ta_"] +
+    0 * full_wet_2$model$coefficients["cos_ta_:n_vft_start"])
+
+# hi turn-angle distribution
+hi_ta_n_vft <- update_vonmises(
+  dist = full_wet_2$ta_,
+  beta_cos_ta = full_wet_2$model$coefficients["cos_ta_"] +
+    2 * full_wet_2$model$coefficients["cos_ta_:n_vft_start"])
+
+#data.frame for plotting
+plot_ta_n_vft <- data.frame(x = rep(NA, 100))
+
+# x-axis is sequence of possible step lengths
+plot_ta_n_vft$x <- seq(from = -pi, to = pi, length.out = 100)
+
+# y-axis is the probability density under the given gamma distribution
+# low
+plot_ta_n_vft$low <- circular::dvonmises(x = plot_ta_n_vft$x, 
+                                   kappa = low_ta_n_vft$params$kappa,
+                                   mu = 0)
+# med
+plot_ta_n_vft$medium <- circular::dvonmises(x = plot_ta_n_vft$x, 
+                                      kappa = med_ta_n_vft$params$kappa,
+                                      mu = 0)
+# hi
+plot_ta_n_vft$high <- circular::dvonmises(x = plot_ta_n_vft$x, 
+                                    kappa = hi_ta_n_vft$params$kappa,
+                                    mu = 0)
+
+# Pivot from wide to long data
+plot_ta_n_vft <- plot_ta_n_vft %>% 
+  pivot_longer(cols = -x)
+```
+
+Prepare the plot of *n_vft* vs *ta\_*
+
+```{r}
+p_ta_n_vft <- ggplot(plot_ta_n_vft, aes(x = x, y = value, color = factor(name))) +
+  geom_line(size = 1) +
+  scale_color_manual(name = "#Known fruiting trees",
+                     breaks = c("low", "medium", "high"),
+                     values = c("gray85", "gray50", "gray20")) +
+  scale_x_continuous(breaks = c(-pi, -pi/2, 0, pi/2, pi),
+                     labels = c(expression(-pi, -pi/2, 0, pi/2, pi))) +
+  labs(x = "", y = "Probability Density", 
+       title = "#Known fruiting trees") +
+  theme_classic() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio = 1,
+        plot.title = element_text(size = 20, hjust = .5),
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_blank(),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size = 20),
+        axis.ticks.x = element_blank(),
+        legend.position = "none",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 18),
+        strip.text = element_text(size = 12),
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0))
+p_ta_n_vft
+```
+
+##### 3.1.9.1.2 *n_vft* vs *sl\_*
+
+```{r}
+# Low n_vft step-length distribution
+low_sl_n_vft <- update_gamma(
+  dist = full_wet_2$sl_,
+  beta_sl = full_wet_2$model$coefficients["sl_"] +
+    -10 * full_wet_2$model$coefficients["sl_:n_vft_start"],
+  beta_log_sl = full_wet_2$model$coefficients["log_sl_"] +
+    -10 * full_wet_2$model$coefficients["log_sl_:n_vft_start"])
+
+# Medium silence step-length distribution
+med_sl_n_vft <- update_gamma(
+  dist = full_wet_2$sl_,
+  beta_sl = full_wet_2$model$coefficients["sl_"] +
+    0 * full_wet_2$model$coefficients["sl_:n_vft_start"],
+  beta_log_sl = full_wet_2$model$coefficients["log_sl_"] +
+    0 * full_wet_2$model$coefficients["log_sl_:n_vft_start"])
+
+# High silence step-length distribution
+hi_sl_n_vft <- update_gamma(
+  dist = full_wet_2$sl_,
+  beta_sl = full_wet_2$model$coefficients["sl_"] +
+    10 * full_wet_2$model$coefficients["sl_:n_vft_start"],
+  beta_log_sl = full_wet_2$model$coefficients["log_sl_"] +
+    10 * full_wet_2$model$coefficients["log_sl_:n_vft_start"])
+
+# Function to adjust parameters
+adjust_params <- function(shape, scale) {
+  if (shape <= 0) shape <- abs(shape) + 1e-5  # Make it slightly positive
+  if (scale <= 0) scale <- abs(scale) + 1e-5  # Make it slightly positive
+  return(list(shape = shape, scale = scale))
+}
+
+# Adjust parameters
+low_sl_adj_n_vft <- adjust_params(low_sl_n_vft$params$shape, low_sl_n_vft$params$scale)
+med_sl_adj_n_vft <- adjust_params(med_sl_n_vft$params$shape, med_sl_n_vft$params$scale)
+hi_sl_adj_n_vft <- adjust_params(hi_sl_n_vft$params$shape, hi_sl_n_vft$params$scale)
+
+# Create the data.frame for plotting
+plot_sl_n_vft <- data.frame(
+  x = seq(from = 0, to = 400, length.out = 100),
+  low = dgamma(x = seq(from = 0, to = 400, length.out = 100), 
+               shape = low_sl_adj_n_vft$shape, scale = low_sl_adj_n_vft$scale),
+  medium = dgamma(x = seq(from = 0, to = 400, length.out = 100), 
+                  shape = med_sl_adj_n_vft$shape, scale = med_sl_adj_n_vft$scale),
+  high = dgamma(x = seq(from = 0, to = 400, length.out = 100), 
+                shape = hi_sl_adj_n_vft$shape, scale = hi_sl_adj_n_vft$scale))
+
+# Verify the structure of the newly created data frame
+str(plot_sl_n_vft)
+
+# Pivot from wide to long data
+plot_sl_long_n_vft <- plot_sl_n_vft %>%
+  pivot_longer(cols = c(low, medium, high), names_to = "n_vft", 
+               values_to = "Density")
+
+# Verify the structure of the reshaped data
+str(plot_sl_long_n_vft)
+```
+
+Prepare the plot of *n_vft* vs *sl\_*
+
+```{r}
+#tiff("n_vft_sl_WET_2025_05_d05.tiff", width = 11000, height = 6500, res = 1000)
+p_sl_n_vft <- ggplot(plot_sl_long_n_vft, aes(x = x, y = Density, color = n_vft)) +
+  geom_line(size = 1) +
+  labs(x = "Step Length (m)", y = "Probability Density", 
+       title = "#Known fruiting trees") +
+  scale_color_manual(name = "",
+                     breaks = c("low", "medium", "high"),
+                     values = c("gray85", "gray50", "gray20")) +
+  theme_classic() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio = 1,
+        plot.title = element_text(size = 20, hjust = .5),
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_blank(),
+        #axis.text.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_blank(),
+        #axis.title.y = element_text(size = 20),
+        axis.title.x = element_blank(),
+        #axis.title.x = element_text(size = 20),
+        axis.ticks.x = element_blank(),
+        legend.position = "none",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 18),
+        strip.text = element_text(size = 12),
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0))
+p_sl_n_vft
+#dev.off()
+```
+
+In @fig-n_vft_mov we can see that there is a small significant effect of number of visited fruit trees on the length of the steps, with steps longer (faster movement) where number of trees is higher. There is also an effect on turn angles, with movement more directed where there are fewer visited feeding trees.
+
+```{r}
+#| label: fig-n_vft_mov 
+#| fig-width: 7
+#| fig-asp: 6 
+#| fig-alt: |
+#|   A plot showing how number of visited fruit trees affected both step lengths and turn angles in the rainy season
+#| fig-cap: |
+#|       Interaction between number of visited fruit trees and both step lengths and turn angles in the rainy season 
+#| warning: FALSE  
+grid.arrange(p1, p_sl_n_vft, p_ta_n_vft, ncol=3)
+```
+
+#### 3.1.9.2 Canopy height vs movement parameters
+
+##### 3.1.9.2.1 *VeDBA_all* vs *ta\_*
+
+```{r}
+#| warning: false
+### VeDBA_all_start:
+# Create again low, med and high turn-angle distribution objects
+low_ta_VeDBA <- update_vonmises(
+  dist = full_wet_2$ta_,
+  beta_cos_ta = full_wet_2$model$coefficients["cos_ta_"] +
+    -2 * full_wet_2$model$coefficients["cos_ta_:VeDBA_all_start"])
+
+# med turn-angle distribution
+med_ta_VeDBA <- update_vonmises(
+  dist = full_wet_2$ta_,
+  beta_cos_ta = full_wet_2$model$coefficients["cos_ta_"] +
+    0 * full_wet_2$model$coefficients["cos_ta_:VeDBA_all_start"])
+
+# hi turn-angle distribution
+hi_ta_VeDBA <- update_vonmises(
+  dist = full_wet_2$ta_,
+  beta_cos_ta = full_wet_2$model$coefficients["cos_ta_"] +
+    2 * full_wet_2$model$coefficients["cos_ta_:VeDBA_all_start"])
+
+#data.frame for plotting
+plot_ta_VeDBA <- data.frame(x = rep(NA, 100))
+
+# x-axis is sequence of possible step lengths
+plot_ta_VeDBA$x <- seq(from = -pi, to = pi, length.out = 100)
+
+# y-axis is the probability density under the given gamma distribution
+# low
+plot_ta_VeDBA$low <- circular::dvonmises(x = plot_ta_VeDBA$x, 
+                                   kappa = low_ta_VeDBA$params$kappa,
+                                   mu = 0)
+# med
+plot_ta_VeDBA$medium <- circular::dvonmises(x = plot_ta_VeDBA$x, 
+                                      kappa = med_ta_VeDBA$params$kappa,
+                                      mu = 0)
+# hi
+plot_ta_VeDBA$high <- circular::dvonmises(x = plot_ta_VeDBA$x, 
+                                    kappa = hi_ta_VeDBA$params$kappa,
+                                    mu = 0)
+
+# Pivot from wide to long data
+plot_ta_VeDBA <- plot_ta_VeDBA %>% 
+  pivot_longer(cols = -x)
+```
+
+Prepare the plot of *VeDBA_all* vs *ta\_*
+
+```{r}
+#tiff("VeDBA_all_ta_WET_2025_05_d05.tiff", width = 11000, height = 6500, res = 1000)
+p_ta_VeDBA <- ggplot(plot_ta_VeDBA, aes(x = x, y = value, color = factor(name))) +
+  geom_line(size = 1) +
+  scale_color_manual(name = "VeDBA",
+                     breaks = c("low", "medium", "high"),
+                     values = c("gray85", "gray50", "gray20")) +
+  scale_x_continuous(breaks = c(-pi, -pi/2, 0, pi/2, pi),
+                     labels = c(expression(-pi, -pi/2, 0, pi/2, pi))) +
+  labs(x = "Turn Angle (radians)", y = "Probability Density", 
+       title = "sVeDBA") +
+  theme_classic() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio = 1,
+        plot.title = element_text(size = 20, hjust = .5),
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size = 20),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 18),
+        strip.text = element_text(size = 12),
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0))
+#dev.off()
+```
+
+##### 3.1.9.2.2 *VeDBA_all* vs *sl\_*
+
+```{r}
+# Low alarm step-length distribution
+low_sl_VeDBA <- update_gamma(
+  dist = full_wet_2$sl_,
+  beta_sl = full_wet_2$model$coefficients["sl_"] +
+    -10 * full_wet_2$model$coefficients["sl_:VeDBA_all_start"],
+  beta_log_sl = full_wet_2$model$coefficients["log_sl_"] +
+    -10 * full_wet_2$model$coefficients["log_sl_:VeDBA_all_start"])
+
+# Medium alarm step-length distribution
+med_sl_VeDBA <- update_gamma(
+  dist = full_wet_2$sl_,
+  beta_sl = full_wet_2$model$coefficients["sl_"] +
+    0 * full_wet_2$model$coefficients["sl_:VeDBA_all_start"],
+  beta_log_sl = full_wet_2$model$coefficients["log_sl_"] +
+    0 * full_wet_2$model$coefficients["log_sl_:VeDBA_all_start"])
+
+# High alarm step-length distribution
+hi_sl_VeDBA <- update_gamma(
+  dist = full_wet_2$sl_,
+  beta_sl = full_wet_2$model$coefficients["sl_"] +
+    10 * full_wet_2$model$coefficients["sl_:VeDBA_all_start"],
+  beta_log_sl = full_wet_2$model$coefficients["log_sl_"] +
+    10 * full_wet_2$model$coefficients["log_sl_:VeDBA_all_start"])
+
+# Function to adjust parameters
+adjust_params_VeDBA <- function(shape, scale) {
+  if (shape <= 0) shape <- abs(shape) + 1e-5  # Make it slightly positive
+  if (scale <= 0) scale <- abs(scale) + 1e-5  # Make it slightly positive
+  return(list(shape = shape, scale = scale))
+}
+
+# Adjust parameters
+low_sl_adj_VeDBA <- adjust_params_VeDBA(low_sl_VeDBA$params$shape, low_sl_VeDBA$params$scale)
+med_sl_adj_VeDBA <- adjust_params_VeDBA(med_sl_VeDBA$params$shape, med_sl_VeDBA$params$scale)
+hi_sl_adj_VeDBA <- adjust_params_VeDBA(hi_sl_VeDBA$params$shape, hi_sl_VeDBA$params$scale)
+
+# Create the data.frame for plotting
+plot_sl_VeDBA <- data.frame(
+  x = seq(from = 0, to = 400, length.out = 100),
+  low = dgamma(x = seq(from = 0, to = 400, length.out = 100), 
+               shape = low_sl_adj_VeDBA$shape, scale = low_sl_adj_VeDBA$scale),
+  medium = dgamma(x = seq(from = 0, to = 400, length.out = 100), 
+                  shape = med_sl_adj_VeDBA$shape, scale = med_sl_adj_VeDBA$scale),
+  high = dgamma(x = seq(from = 0, to = 400, length.out = 100), 
+                shape = hi_sl_adj_VeDBA$shape, scale = hi_sl_adj_VeDBA$scale))
+
+# Verify the structure of the newly created data frame
+str(plot_sl_VeDBA)
+
+# Pivot from wide to long data
+plot_sl_long_VeDBA <- plot_sl_VeDBA %>%
+  pivot_longer(cols = c(low, medium, high), names_to = "VeDBA_all", 
+               values_to = "Density")
+
+# Verify the structure of the reshaped data
+str(plot_sl_long_VeDBA)
+```
+
+Prepare the plot of *VeDBA_all* vs *sl\_*
+
+```{r}
+#tiff("VeDBA_all_WET_2025_05_d05.tiff", width = 11000, height = 6500, res = 1000)
+p_sl_VeDBA <- ggplot(plot_sl_long_VeDBA, aes(x = x, y = Density, color = VeDBA_all)) +
+  geom_line(size = 1) +
+  labs(x = "Step length (m)", y = "", 
+       title = "sVeDBA") +
+  scale_color_manual(name = "sVeDBA",
+                     breaks = c("low", "medium", "high"),
+                     values = c("gray85", "gray50", "gray20")) +
+  theme_classic() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio = 1,
+        plot.title = element_text(size = 20, hjust = .5),
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 20),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 18),
+        strip.text = element_text(size = 12),
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0))
+#dev.off()
+```
+
+In @fig-VeDBA_mov_wet we can see that there is a small significant effect of VeDBA on the length of the steps, with steps longer (faster movement) where VeDBA is higher. There is also a marginaly significant effect on turn angles, with movement more directed where VeDBA is higher.
+
+```{r}
+#| label: fig-VeDBA_mov_wet 
+#| fig-width: 7
+#| fig-asp: 6 
+#| fig-alt: |
+#|   A plot showing how number of visited fruit trees affected both step lengths and turn angles in the rainy season
+#| fig-cap: |
+#|       Interaction between number of visited fruit trees and both step lengths and turn angles in the rainy season 
+#| warning: FALSE  
+grid.arrange(p_sl_VeDBA, p_ta_VeDBA, ncol=2)
+```
+
+## 3.2 Dry season - model fit
+
+I will fit models with interactions with movement parameters (*sl\_*, *log_sl\_*, *ta\_* and *cos_ta\_*) and and without the interactions
+
+### 3.2.1 Forest structure model
+
+```{r}
+frst_st_model_int_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ dist_f_b_end + nt_bot_end + tree_H_end + sl_ + log_sl_ + 
+               cos_ta_ + 
+               dist_f_b_start:(sl_ + log_sl_ + cos_ta_) +
+               nt_bot_start:(sl_ + log_sl_ + cos_ta_) +
+               tree_H_start:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+frst_st_model_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ dist_f_b_end + nt_bot_end + tree_H_end + sl_ + log_sl_ + 
+               cos_ta_ + strata(step_id_), model=TRUE)
+```
+
+### 3.2.2 Fruits model
+
+```{r}
+fruits_bot_model_int_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ nft_bot_end + KJ_bot_end +
+               sl_ + log_sl_ + cos_ta_ + 
+               nft_bot_start:(sl_ + log_sl_ + cos_ta_) +
+               KJ_bot_start:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+fruits_bot_model_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ nft_bot_end + KJ_bot_end +
+               sl_ + log_sl_ + cos_ta_ + strata(step_id_), model=TRUE)
+
+fruits_vis_model_int_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ n_vft_end + KJ_vft_end + 
+               sl_ + log_sl_ + cos_ta_ + 
+               n_vft_start:(sl_ + log_sl_ + cos_ta_) +
+               KJ_vft_start:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+fruits_vis_model_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ n_vft_end + KJ_vft_end +
+               sl_ + log_sl_ + cos_ta_ + strata(step_id_), model=TRUE)
+```
+
+### 3.2.3 Invertebrates model
+
+```{r}
+insect_model_int_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ inv_bio_end + sl_ + log_sl_ + cos_ta_ + 
+               inv_bio_start:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+insect_model_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ inv_bio_end + sl_ + log_sl_ + cos_ta_ + 
+               strata(step_id_), model=TRUE)
+```
+
+### 3.2.4 Fear model
+
+```{r}
+fear_model_int_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ n_alarm_end + sl_ + log_sl_ + cos_ta_ + 
+               n_alarm_start:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+fear_model_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ n_alarm_end + sl_ + log_sl_ + cos_ta_ + 
+               strata(step_id_), 
+             model=TRUE)
+```
+
+### 3.2.5 VeDBA model
+
+```{r}
+vedba_model_int_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ VeDBA_end + sl_ + log_sl_ + cos_ta_ + 
+               VeDBA_start:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+vedba_model_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ VeDBA_end + sl_ + log_sl_ + cos_ta_ + strata(step_id_), 
+             model=TRUE)
+```
+
+### 3.2.6 Social model
+
+```{r}
+conspecifics_model_int_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ UDcons_end + n_lc_end + sl_ + log_sl_ + cos_ta_ + 
+               UDcons_start:(sl_ + log_sl_ + cos_ta_) +
+               n_lc_start:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+conspecifics_model_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ UDcons_end + n_lc_end + sl_ + log_sl_ + cos_ta_ +
+               strata(step_id_), model=TRUE)
+
+social_border_model_int_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ dist_f_b_end + n_lc_end + sl_ + log_sl_ + cos_ta_ + 
+               dist_f_b_start:(sl_ + log_sl_ + cos_ta_) +
+               n_lc_end:(sl_ + log_sl_ + cos_ta_) +
+               strata(step_id_), model=TRUE)
+
+social_border_model_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ dist_f_b_end + n_lc_end + sl_ + log_sl_ + cos_ta_ +
+               strata(step_id_), model=TRUE)
+```
+
+### 3.2.7 Null model
+
+```{r}
+null_model_dry <- ssf_dry %>% 
+  fit_clogit(case_ ~ 1 + sl_ + log_sl_ + cos_ta_ + strata(step_id_), 
+             model=TRUE)
+```
+
+### 3.2.8 Compare models
+
+```{r}
+conspecifics_model_int_dry_aic <- AIC(conspecifics_model_int_dry)
+conspecifics_model_dry_aic <- AIC(conspecifics_model_dry)
+fruits_bot_model_int_dry_aic <- AIC(fruits_bot_model_int_dry)
+fruits_bot_model_dry_aic <- AIC(fruits_bot_model_dry)
+fruits_vis_model_int_dry_aic <- AIC(fruits_vis_model_int_dry)
+fruits_vis_model_dry_aic <- AIC(fruits_vis_model_dry)
+insect_model_int_dry_aic <- AIC(insect_model_int_dry)
+insect_model_dry_aic <- AIC(insect_model_dry)
+frst_st_model_int_dry_aic <- AIC(frst_st_model_int_dry)
+frst_st_model_dry_aic <- AIC(frst_st_model_dry)
+vedba_model_int_dry_aic <- AIC(vedba_model_int_dry)
+vedba_model_dry_aic <- AIC(vedba_model_dry)
+fear_model_int_dry_aic <- AIC(fear_model_int_dry)
+fear_model_dry_aic <- AIC(fear_model_dry)
+social_border_model_int_dry_aic <- AIC(social_border_model_int_dry)
+social_border_model_dry_aic <- AIC(social_border_model_dry)
+null_model_dry_aic <- AIC(null_model_dry)
+
+# Compare AIC values
+aic_table_dry <- data.frame(Model = c("conspecifics_model_int_dry", 
+                                      "conspecifics_model_dry", 
+                                      "fruits_bot_model_int_dry", 
+                                      "fruits_bot_model_dry",
+                                      "fruits_vis_model_int_dry", 
+                                      "fruits_vis_model_dry",
+                                      "insect_model_int_dry",
+                                      "insect_model_dry",
+                                      "frst_st_model_int_dry",
+                                      "frst_st_model_dry", 
+                                      "vedba_model_int_dry",
+                                      "vedba_model_dry",
+                                      "fear_model_int_dry",
+                                      "fear_model_dry",
+                                      "social_border_model_int_dry",
+                                      "social_border_model_dry",
+                                      "null_model_dry"),
+                            AIC_Value = c(conspecifics_model_int_dry_aic, 
+                                          conspecifics_model_dry_aic,
+                                          fruits_bot_model_int_dry_aic,
+                                          fruits_bot_model_dry_aic,
+                                          fruits_vis_model_int_dry_aic,
+                                          fruits_vis_model_dry_aic, 
+                                          insect_model_int_dry_aic,
+                                          insect_model_dry_aic,
+                                          frst_st_model_int_dry_aic,
+                                          frst_st_model_dry_aic, 
+                                          vedba_model_int_dry_aic,
+                                          vedba_model_dry_aic,
+                                          fear_model_int_dry_aic,
+                                          fear_model_dry_aic,
+                                          social_border_model_int_dry_aic,
+                                          social_border_model_dry_aic,
+                                          null_model_dry_aic))
+
+
+# Find the index of the best model (i.e., the model with the lowest AIC value)
+best_model_index_dry <- which.min(aic_table_dry$AIC_Value)
+# Subtract lowest AIC_value from all the rest to create a delta_AIC column
+aic_table_dry$delta_AIC<-aic_table_dry$AIC_Value-min(aic_table_dry$AIC_Value)
+# Sort the AIC table by AIC values in increasing order
+aic_table_sorted_dry <- aic_table_dry[order(aic_table_dry$AIC_Value), ]
+print(aic_table_sorted_dry)
+```
+
+I can see that *vedba_model_int_dry*, *insect_model_int_dry*, *vedba_model_dry*, *social_border_model_int_dry*, *insect_model_dry*, *fruits_bot_model_dry*, are worse or equal to null_model.
+
+Best model is *fear_model_int_dry*:
+
+```{r}
+summary(fear_model_int_dry)
+```
+
+Inspect other models better than null:
+
+```{r}
+summary(fruits_vis_model_int_dry)
+summary(fruits_vis_model_dry) 
+summary(fear_model_dry)
+summary(frst_st_model_int_dry) 
+summary(frst_st_model_dry) 
+summary(conspecifics_model_int_dry)
+summary(fruits_bot_model_int_dry)
+summary(conspecifics_model_dry)
+summary(social_border_model_dry)
+```
+
+From the outputs of the models, I will fit more complex models with covariates and interactions so I can choose best model again
+
+```{r}
+summary(full_dry_1 <- ssf_dry %>% 
+          fit_clogit(case_ ~ n_vft_end + KJ_bot_end + tree_H_end + 
+                       n_alarm_end+ n_lc_end + sl_ + log_sl_ + cos_ta_ +
+                       n_vft_start:(sl_ + log_sl_ + cos_ta_) + 
+                       tree_H_start:(sl_ + log_sl_ + cos_ta_) +
+                       n_alarm_start:(sl_ + log_sl_ + cos_ta_) +
+                       n_lc_start:(sl_ + log_sl_ + cos_ta_) +
+                       KJ_bot_start:(sl_ + log_sl_ + cos_ta_) +
+                       strata(step_id_), 
+                     model=TRUE))
+
+summary(full_dry_2 <- ssf_dry %>% 
+          fit_clogit(case_ ~ n_vft_end + tree_H_end + 
+                       n_alarm_end + n_lc_end + sl_ + log_sl_ + cos_ta_ +
+                       n_vft_start:(sl_ + log_sl_ + cos_ta_) + 
+                       tree_H_start:(sl_ + log_sl_ + cos_ta_) +
+                       n_alarm_start:(sl_ + log_sl_ + cos_ta_) +
+                       n_lc_start:(sl_ + log_sl_ + cos_ta_) +
+                       strata(step_id_), 
+                     model=TRUE))
+
+summary(full_dry_3 <- ssf_dry %>% 
+          fit_clogit(case_ ~ n_vft_end + tree_H_end + 
+                       n_alarm_end + sl_ + log_sl_ + cos_ta_ +
+                       n_vft_start:(sl_ + log_sl_ + cos_ta_) + 
+                       tree_H_start:(sl_ + log_sl_ + cos_ta_) +
+                       n_alarm_start:(sl_ + log_sl_ + cos_ta_) +
+                       strata(step_id_), 
+                     model=TRUE))
+
+AIC(full_dry_1)
+AIC(full_dry_2)
+AIC(full_dry_3)
+```
+
+Model *full_dry_1* is the best model. I will use *full_dry_1* for further analyses.
+
+### 3.2.9 Check tentative vs updated movement parameters
+
+#### 3.2.9.1 Step lengths
+
+```{r}
+updated_sl <- update_sl_distr(full_dry_1)
+# data.frame for plotting
+plot_sl <- data.frame(x = rep(NA, 100))
+
+# x-axis is sequence of possible step lengths
+plot_sl$x <- seq(from = 0, to = 400, length.out = 100)
+
+# y-axis is the probability density under the given gamma distribution
+# For the tentative distribution
+plot_sl$tentative <- dgamma(
+  x = plot_sl$x, 
+  shape = full_dry_1$sl_$params$shape,
+  scale = full_dry_1$sl_$params$scale)
+
+# For the updated distribution
+plot_sl$updated <- dgamma(
+  x = plot_sl$x,
+  shape = updated_sl$params$shape,
+  scale = updated_sl$params$scale)
+
+# Pivot from wide data to long data
+plot_sl <- plot_sl %>% 
+  pivot_longer(cols = -x)
+```
+
+In @fig-sl_dry we can see that there is not much variation between tentative and updated step lengths. This was expected since our model did not find significance for *sl\_*.
+
+```{r}
+#| label: fig-sl_dry
+#| fig-width: 5
+#| fig-asp: 1 
+#| fig-alt: |
+#|   A plot showing tentative and updated step lengths
+#| fig-cap: |
+#|       Comparison between tentative and updated step lengths based on model full_dry_1
+#| warning: FALSE  
+ggplot(plot_sl, aes(x = x, y = value, color = factor(name))) +
+  geom_line(linewidth = 1) +
+  xlab("Step Length (m)") +
+  ylab("Probability Density") +
+  scale_color_manual(name = "Distribution", 
+                     breaks = c("tentative", "updated"),
+                     values = c("blue", "orange")) +
+  theme_bw()
+```
+
+#### 3.2.9.2 Turn angles
+
+```{r}
+#| warning: FALSE
+updated_ta <- update_ta_distr(full_dry_1)
+
+# data.frame for plotting
+plot_ta <- data.frame(x = rep(NA, 100))
+
+# x-axis is sequence of possible step lengths
+plot_ta$x <- seq(from = -1 * pi, to = pi, length.out = 100)
+
+# y-axis is the probability density under the given von Mises distribution
+# For the tentative distribution
+plot_ta$tentative <- circular::dvonmises(
+  x = plot_ta$x, 
+  mu = full_dry_1$ta_$params$mu,
+  kappa = full_dry_1$ta_$params$kappa)
+
+# For the updated distribution
+plot_ta$updated <- circular::dvonmises(
+  x = plot_ta$x, 
+  mu = updated_ta$params$mu,
+  kappa = updated_ta$params$kappa)
+
+# Pivot from wide data to long data
+plot_ta <- plot_ta %>% 
+  pivot_longer(cols = -x)
+```
+
+As in @fig-sl_dry, in @fig-ta_dry we can see that there is not much variation between tentative and updated turn angles. This was expected since our model did not find significance for *ta\_*.
+
+```{r}
+#| label: fig-ta_dry 
+#| fig-width: 5
+#| fig-asp: 1 
+#| fig-alt: |
+#|   A plot showing tentative and updated turn angles
+#| fig-cap: |
+#|       Comparison between tentative and updated turn angles based on model full_dry_1
+#| warning: FALSE  
+ggplot(plot_ta, aes(x = x, y = value, color = factor(name))) +
+  geom_line(size = 1) +
+  coord_cartesian(ylim = c(0, 0.4)) +  # ← increased upper limit
+  xlab("Relative Turn Angle (radians)") +
+  ylab("Probability Density") +
+  scale_x_continuous(breaks = c(-pi, -pi/2, 0, pi/2, pi),
+                     labels = c(expression(-pi),expression(-pi/2),
+                                expression(0), 
+                                expression(pi/2), 
+                                expression(pi))) +
+  scale_color_manual(
+    name = "Distribution", 
+    breaks = c("tentative", "updated"),
+    values = c("blue", "orange")) +
+  theme_bw()
+```
+
+### 3.2.9 Calculate Relative selection strengths
+
+To calculate the relative selection strengths for the covariates included in *full_wet_2*, I will create a series of data frames with medium, maximum and minimum values for each of the covariates in *full_wet_2*.
+
+```{r}
+# Effect of just n_vft
+s1 <- data.frame(
+  n_vft_end = seq(from = -2, to = 2, length.out = 200),
+  tree_H_end = 0,
+  n_alarm_end = 0,
+  n_lc_end = 0,
+  n_vft_start = 0,
+  tree_H_start = 0,
+  n_alarm_start = 0,
+  n_lc_start = 0,
+  sl_ = median(ssf_dry$sl_),
+  log_sl_ = log(median(ssf_dry$sl_)),
+  cos_ta_ = median(ssf_dry$cos_ta_))
+
+# data.frame for s5 -> all average
+s2 <- data.frame(
+  n_vft_end = 0,
+  tree_H_end = 0,
+  n_alarm_end = 0,
+  n_lc_end = 0,
+  n_vft_start = 0,
+  tree_H_start = 0,
+  n_alarm_start = 0,
+  n_lc_start = 0,
+  sl_ = median(ssf_dry$sl_),
+  log_sl_ = log(median(ssf_dry$sl_)),
+  cos_ta_ = median(ssf_dry$cos_ta_))
+
+# Calculate log-RSS with Bootstrap Confidence Intervals
+lr1 <- log_rss(full_dry_2, s1, s2, ci = "se", ci_level = 0.95)
+foo <- lr1
+n_vft_dry_df <- lr1$df
+
+# Tree Height
+s3 <- data.frame(
+  n_vft_end = 0,
+  tree_H_end = seq(from = -2, to = 2, length.out = 200),
+  n_alarm_end = 0,
+  n_lc_end = 0,
+  n_vft_start = 0,
+  tree_H_start = 0,
+  n_alarm_start = 0,
+  n_lc_start = 0,
+  sl_ = median(ssf_dry$sl_),
+  log_sl_ = log(median(ssf_dry$sl_)),
+  cos_ta_ = median(ssf_dry$cos_ta_))
+
+lr2 <- log_rss(full_dry_2, s3, s2, ci = "se", ci_level = 0.95)
+tree_H_dry_df <- lr2$df
+
+
+# Alarm calls
+s4 <- data.frame(
+  n_vft_end = 0,
+  tree_H_end = 0,
+  n_alarm_end = seq(from = -2, to = 2, length.out = 200),
+  n_lc_end = 0,
+  n_vft_start = 0,
+  tree_H_start = 0,
+  n_alarm_start = 0,
+  n_lc_start = 0,
+  sl_ = median(ssf_dry$sl_),
+  log_sl_ = log(median(ssf_dry$sl_)),
+  cos_ta_ = median(ssf_dry$cos_ta_))
+
+lr3 <- log_rss(full_dry_2, s4, s2, ci = "se", ci_level = 0.95)
+alarm_dry_df <- lr3$df
+
+df1_dry <- n_vft_dry_df %>%
+  transmute(x = n_vft_end_x1, log_rss, lwr, upr, variable = "#Known fruiting trees")
+
+df2_dry <- tree_H_dry_df %>%
+  transmute(x = tree_H_end_x1, log_rss, lwr, upr, variable = "Canopy height (m)")
+
+combined_df_dry <- bind_rows(df1_dry, df2_dry)
+```
+
+Now, in @fig-habitat_dry we can see that there is a positive selection for number of visited fruit feeding trees and canopy height, the significant covariates selected in model *full_dry_1*.
+
+```{r}
+#| label: fig-habitat_dry 
+#| fig-width: 5
+#| fig-asp: 1 
+#| fig-alt: |
+#|   A plot showing selection strengths for n_vft and tree_H
+#| fig-cap: |
+#|       Selection strengths for significant covariates in model full_dry_1
+#| warning: FALSE  
+p2 <- ggplot(combined_df_dry, aes(x = x, y = exp(log_rss), 
+                                  color = variable, fill = variable)) +
+  geom_ribbon(aes(ymin = exp(lwr), ymax = exp(upr)), alpha = 0.2, color = NA) +
+  geom_line(size = 1.2) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray30") +
+  scale_color_manual(values = curve_colors) +
+  scale_fill_manual(values = curve_colors) +
+  labs(x = "Predictor (SD)", y = "Log-RSS vs Mean predictor", color = "", fill = "") +
+  theme_classic() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio = 1,
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size = 20),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 18),
+        strip.text = element_text(size = 12),
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0))
+p2
+```
+
+## 3.2.10 Interaction between movement and covariates
+
+As in relative selection strengths, I will create a series of data frames with different values for each covariate.
+
+### 3.2.10.1 Number of alarm calls vs movement parameters
+
+#### 3.2.10.1.1 *n_alarm* vs *ta\_*
+
+```{r}
+#| warning: false
+# Create again low, med and high turn-angle distribution objects
+low_ta_n_alarm_d <- update_vonmises(
+  dist = full_dry_2$ta_,
+  beta_cos_ta = full_dry_2$model$coefficients["cos_ta_"] +
+    -2 * full_dry_2$model$coefficients["cos_ta_:n_alarm_start"])
+
+# med turn-angle distribution
+med_ta_n_alarm_d <- update_vonmises(
+  dist = full_dry_2$ta_,
+  beta_cos_ta = full_dry_2$model$coefficients["cos_ta_"] +
+    0 * full_dry_2$model$coefficients["cos_ta_:n_alarm_start"])
+
+# hi turn-angle distribution
+hi_ta_n_alarm_d <- update_vonmises(
+  dist = full_dry_2$ta_,
+  beta_cos_ta = full_dry_2$model$coefficients["cos_ta_"] +
+    2 * full_dry_2$model$coefficients["cos_ta_:n_alarm_start"])
+
+#data.frame for plotting
+plot_ta_n_alarm_d <- data.frame(x = rep(NA, 100))
+
+# x-axis is sequence of possible step lengths
+plot_ta_n_alarm_d$x <- seq(from = -pi, to = pi, length.out = 100)
+
+# y-axis is the probability density under the given gamma distribution
+# low
+plot_ta_n_alarm_d$low <- circular::dvonmises(x = plot_ta_n_alarm_d$x, 
+                                   kappa = low_ta_n_alarm_d$params$kappa,
+                                   mu = 0)
+# med
+plot_ta_n_alarm_d$medium <- circular::dvonmises(x = plot_ta_n_alarm_d$x, 
+                                      kappa = med_ta_n_alarm_d$params$kappa,
+                                      mu = 0)
+# hi
+plot_ta_n_alarm_d$high <- circular::dvonmises(x = plot_ta_n_alarm_d$x, 
+                                    kappa = hi_ta_n_alarm_d$params$kappa,
+                                    mu = 0)
+
+# Pivot from wide to long data
+plot_ta_n_alarm_d <- plot_ta_n_alarm_d %>% 
+  pivot_longer(cols = -x)
+```
+
+Prepare the plot of *n_alarm* vs *ta\_*
+
+```{r}
+#tiff("alarm_ta_dry_2025_05_d05.tiff", width = 11000, height = 6500, res = 1000)
+p_ta_n_alarm_dry <- ggplot(plot_ta_n_alarm_d, aes(x = x, y = value, color = factor(name))) +
+  geom_line(size = 1) +
+  scale_color_manual(name = "#Alarm calls",
+                     breaks = c("low", "medium", "high"),
+                     values = c("gray85", "gray50", "gray20")) +
+  scale_x_continuous(breaks = c(-pi, -pi/2, 0, pi/2, pi),
+                     labels = c(expression(-pi, -pi/2, 0, pi/2, pi))) +
+  labs(x = "Turn Angle (radians)", y = "Probability Density", 
+       title = "#Alarm calls") +
+  theme_classic() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio = 1,
+        plot.title = element_text(size = 20, hjust = .5),
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size = 20),
+        legend.position = "none",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 18),
+        strip.text = element_text(size = 12),
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0))
+#dev.off()
+```
+
+#### 3.2.10.1.2 *n_alarm* vs *sl\_*
+
+```{r}
+# Low alarm step-length distribution
+low_sl_n_alarm_d <- update_gamma(
+  dist = full_dry_2$sl_,
+  beta_sl = full_dry_2$model$coefficients["sl_"] +
+    -2 * full_dry_2$model$coefficients["sl_:n_alarm_start"],
+  beta_log_sl = full_dry_2$model$coefficients["log_sl_"] +
+    -2 * full_dry_2$model$coefficients["log_sl_:n_alarm_start"])
+
+# Medium alarm step-length distribution
+med_sl_n_alarm_d <- update_gamma(
+  dist = full_dry_2$sl_,
+  beta_sl = full_dry_2$model$coefficients["sl_"] +
+    0 * full_dry_2$model$coefficients["sl_:n_alarm_start"],
+  beta_log_sl = full_dry_2$model$coefficients["log_sl_"] +
+    0 * full_dry_2$model$coefficients["log_sl_:n_alarm_start"])
+
+# High alarm step-length distribution
+hi_sl_n_alarm_d <- update_gamma(
+  dist = full_dry_2$sl_,
+  beta_sl = full_dry_2$model$coefficients["sl_"] +
+    2 * full_dry_2$model$coefficients["sl_:n_alarm_start"],
+  beta_log_sl = full_dry_2$model$coefficients["log_sl_"] +
+    2 * full_dry_2$model$coefficients["log_sl_:n_alarm_start"])
+
+# Function to adjust parameters
+adjust_params_n_alarm_d <- function(shape, scale) {
+  if (shape <= 0) shape <- abs(shape) + 1e-5  # Make it slightly positive
+  if (scale <= 0) scale <- abs(scale) + 1e-5  # Make it slightly positive
+  return(list(shape = shape, scale = scale))
+}
+
+# Adjust parameters
+low_sl_adj_n_alarm_d <- adjust_params(low_sl_n_alarm_d$params$shape, low_sl_n_alarm_d$params$scale)
+med_sl_adj_n_alarm_d <- adjust_params(med_sl_n_alarm_d$params$shape, med_sl_n_alarm_d$params$scale)
+hi_sl_adj_n_alarm_d <- adjust_params(hi_sl_n_alarm_d$params$shape, hi_sl_n_alarm_d$params$scale)
+
+# Create the data.frame for plotting
+plot_sl_n_alarm_d <- data.frame(
+  x = seq(from = 0, to = 400, length.out = 100),
+  low = dgamma(x = seq(from = 0, to = 400, length.out = 100), 
+               shape = low_sl_adj_n_alarm_d$shape, scale = low_sl_adj_n_alarm_d$scale),
+  medium = dgamma(x = seq(from = 0, to = 400, length.out = 100), 
+                  shape = med_sl_adj_n_alarm_d$shape, scale = med_sl_adj_n_alarm_d$scale),
+  high = dgamma(x = seq(from = 0, to = 400, length.out = 100), 
+                shape = hi_sl_adj_n_alarm_d$shape, scale = hi_sl_adj_n_alarm_d$scale))
+
+# Verify the structure of the newly created data frame
+str(plot_sl_n_alarm_d)
+
+# Pivot from wide to long data
+plot_sl_n_alarm_d <- plot_sl_n_alarm_d %>%
+  pivot_longer(cols = c(low, medium, high), names_to = "n_alarm", 
+               values_to = "Density")
+
+# Verify the structure of the reshaped data
+str(plot_sl_n_alarm_d)
+```
+
+Prepare the plot of *n_alarm* vs *sl\_*
+
+```{r}
+#tiff("alarm_sl_dry_2025_05_d05.tiff", width = 11000, height = 6500, res = 1000)
+p_sl_n_alarm_dry <- ggplot(plot_sl_n_alarm_d, aes(x = x, y = Density, color = n_alarm)) +
+  geom_line(size = 1) +
+  labs(x = "Step length (m)", y = "", 
+       title = "#Alarm calls") +
+  scale_color_manual(name = "#Alarms",
+                     breaks = c("low", "medium", "high"),
+                     values = c("gray85", "gray50", "gray20")) +
+  theme_classic() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio = 1,
+        plot.title = element_text(size = 20, hjust = .5),
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 20),
+        legend.position = "none",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 18),
+        strip.text = element_text(size = 12),
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0))
+#dev.off()
+```
+
+In @fig-alarm_mov_dry we can see that there is a marginally significant effect of the number of alarm calls on the length of the steps, with steps longer (faster movement) where the number of alarm calls is higher. There is also a significant effect on turn angles, with movement more directed where the number of alarm calls is lower.
+
+```{r}
+#| label: fig-alarm_mov_dry
+#| fig-width: 7
+#| fig-asp: 6 
+#| fig-alt: |
+#|   A plot showing how number of alarm calls affected both step lengths and turn angles in the rainy season
+#| fig-cap: |
+#|       Interaction between number of alarm calls and both step lengths and turn angles in the rainy season 
+#| warning: FALSE  
+grid.arrange(p_sl_n_alarm_dry, p_ta_n_alarm_dry, ncol=2)
+```
+
+### 3.2.10.2 Number of inter group long calls vs movement parameters
+
+#### 3.2.10.2.1 *n_lc* vs *ta\_*
+
+```{r}
+#| warning: false
+# Create again low, med and high turn-angle distribution objects
+low_ta_n_lc_d <- update_vonmises(
+  dist = full_dry_2$ta_,
+  beta_cos_ta = full_dry_2$model$coefficients["cos_ta_"] +
+    -2 * full_dry_2$model$coefficients["cos_ta_:n_lc_start"])
+
+# med turn-angle distribution
+med_ta_n_lc_d <- update_vonmises(
+  dist = full_dry_2$ta_,
+  beta_cos_ta = full_dry_2$model$coefficients["cos_ta_"] +
+    0 * full_dry_2$model$coefficients["cos_ta_:n_lc_start"])
+
+# hi turn-angle distribution
+hi_ta_n_lc_d <- update_vonmises(
+  dist = full_dry_2$ta_,
+  beta_cos_ta = full_dry_2$model$coefficients["cos_ta_"] +
+    2 * full_dry_2$model$coefficients["cos_ta_:n_lc_start"])
+
+#data.frame for plotting
+plot_ta_n_lc_d <- data.frame(x = rep(NA, 100))
+
+# x-axis is sequence of possible step lengths
+plot_ta_n_lc_d$x <- seq(from = -pi, to = pi, length.out = 100)
+
+# y-axis is the probability density under the given gamma distribution
+# low
+plot_ta_n_lc_d$low <- circular::dvonmises(x = plot_ta_n_lc_d$x, 
+                                   kappa = low_ta_n_lc_d$params$kappa,
+                                   mu = 0)
+# med
+plot_ta_n_lc_d$medium <- circular::dvonmises(x = plot_ta_n_lc_d$x, 
+                                      kappa = med_ta_n_lc_d$params$kappa,
+                                      mu = 0)
+# hi
+plot_ta_n_lc_d$high <- circular::dvonmises(x = plot_ta_n_lc_d$x, 
+                                    kappa = hi_ta_n_lc_d$params$kappa,
+                                    mu = 0)
+
+# Pivot from wide to long data
+plot_ta_n_lc_d <- plot_ta_n_lc_d %>% 
+  pivot_longer(cols = -x)
+```
+
+Prepare the plot of *n_lc* vs *ta\_*
+
+```{r}
+#tiff("n_lc_ta_dry_2025_05_d05.tiff", width = 11000, height = 6500, res = 1000)
+p_ta_n_lc_dry <- ggplot(plot_ta_n_lc_d, aes(x = x, y = value, color = factor(name))) +
+  geom_line(size = 1) +
+  scale_color_manual(name = "Log(#Long calls)",
+                     breaks = c("low", "medium", "high"),
+                     values = c("gray85", "gray50", "gray20")) +
+  scale_x_continuous(breaks = c(-pi, -pi/2, 0, pi/2, pi),
+                     labels = c(expression(-pi, -pi/2, 0, pi/2, pi))) +
+  labs(x = "Turn Angle (radians)", y = "Probability Density", 
+       title = "Log(#Long calls)") +
+  theme_classic() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio = 1,
+        plot.title = element_text(size = 20, hjust = .5),
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size = 20),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 18),
+        strip.text = element_text(size = 12),
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0))
+#dev.off()
+```
+
+#### 3.2.10.2.2 *n_lc* vs *sl\_*
+
+```{r}
+# Low alarm step-length distribution
+low_sl_n_lc_d <- update_gamma(
+  dist = full_dry_2$sl_,
+  beta_sl = full_dry_2$model$coefficients["sl_"] +
+    -2 * full_dry_2$model$coefficients["sl_:n_lc_start"],
+  beta_log_sl = full_dry_2$model$coefficients["log_sl_"] +
+    -2 * full_dry_2$model$coefficients["log_sl_:n_lc_start"])
+
+# Medium alarm step-length distribution
+med_sl_n_lc_d <- update_gamma(
+  dist = full_dry_2$sl_,
+  beta_sl = full_dry_2$model$coefficients["sl_"] +
+    0 * full_dry_2$model$coefficients["sl_:n_lc_start"],
+  beta_log_sl = full_dry_2$model$coefficients["log_sl_"] +
+    0 * full_dry_2$model$coefficients["log_sl_:n_lc_start"])
+
+# High alarm step-length distribution
+hi_sl_n_lc_d <- update_gamma(
+  dist = full_dry_2$sl_,
+  beta_sl = full_dry_2$model$coefficients["sl_"] +
+    2 * full_dry_2$model$coefficients["sl_:n_lc_start"],
+  beta_log_sl = full_dry_2$model$coefficients["log_sl_"] +
+    2 * full_dry_2$model$coefficients["log_sl_:n_lc_start"])
+
+# Function to adjust parameters
+adjust_params_n_lc_d <- function(shape, scale) {
+  if (shape <= 0) shape <- abs(shape) + 1e-5  # Make it slightly positive
+  if (scale <= 0) scale <- abs(scale) + 1e-5  # Make it slightly positive
+  return(list(shape = shape, scale = scale))
+}
+
+# Adjust parameters
+low_sl_adj_n_lc_d <- adjust_params(low_sl_n_lc_d$params$shape, low_sl_n_lc_d$params$scale)
+med_sl_adj_n_lc_d <- adjust_params(med_sl_n_lc_d$params$shape, med_sl_n_lc_d$params$scale)
+hi_sl_adj_n_lc_d <- adjust_params(hi_sl_n_lc_d$params$shape, hi_sl_n_lc_d$params$scale)
+
+# Create the data.frame for plotting
+plot_sl_n_lc_d <- data.frame(
+  x = seq(from = 0, to = 400, length.out = 100),
+  low = dgamma(x = seq(from = 0, to = 400, length.out = 100), 
+               shape = low_sl_adj_n_lc_d$shape, scale = low_sl_adj_n_lc_d$scale),
+  medium = dgamma(x = seq(from = 0, to = 400, length.out = 100), 
+                  shape = med_sl_adj_n_lc_d$shape, scale = med_sl_adj_n_lc_d$scale),
+  high = dgamma(x = seq(from = 0, to = 400, length.out = 100), 
+                shape = hi_sl_adj_n_lc_d$shape, scale = hi_sl_adj_n_lc_d$scale))
+
+# Verify the structure of the newly created data frame
+str(plot_sl_n_lc_d)
+
+# Pivot from wide to long data
+plot_sl_n_lc_d <- plot_sl_n_lc_d %>%
+  pivot_longer(cols = c(low, medium, high), names_to = "n_lc", 
+               values_to = "Density")
+
+# Verify the structure of the reshaped data
+str(plot_sl_n_lc_d)
+```
+
+Prepare the plot of *n_lc* vs *sl\_*
+
+```{r}
+#tiff("n_lc_sl_dry_2025_05_d05.tiff", width = 11000, height = 6500, res = 1000)
+p_sl_n_lc_dry <- ggplot(plot_sl_n_lc_d, aes(x = x, y = Density, color = n_lc)) +
+  geom_line(size = 1) +
+  labs(x = "Step length (m)", y = "", 
+       title = "Log(#Long calls)") +
+  scale_color_manual(name = "Log(#Long calls)",
+                     breaks = c("low", "medium", "high"),
+                     values = c("gray85", "gray50", "gray20")) +
+  theme_classic() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio = 1,
+        plot.title = element_text(size = 20, hjust = .5),
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 20),
+        legend.position = "none",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 18),
+        strip.text = element_text(size = 12),
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0))
+#dev.off()
+```
+
+In @fig-lc_mov_dry we can see that there is a marginally significant effect of the number of inter group long calls on the length of the steps, with longer steps (faster movement) where the number of inter group long calls is higher. There is also a significant effect on turn angles, with movement more directed where the number of long calls is lower.
+
+```{r}
+#| label: fig-lc_mov_dry
+#| fig-width: 7
+#| fig-asp: 6 
+#| fig-alt: |
+#|   A plot showing how number of inter group long calls affected both step lengths and turn angles in the rainy season
+#| fig-cap: |
+#|       Interaction between number of inter group long calls and both step lengths and turn angles in the rainy season 
+#| warning: FALSE  
+grid.arrange(p_sl_n_lc_dry, p_ta_n_lc_dry, ncol=2)
+```
+
+### 3.2.10.3 Fruit energy content vs movement parameters
+
+#### 3.2.10.3.1 *KJ_bot* vs *ta\_*
+
+```{r}
+#| warning: false
+## KJ_bot_start
+# Create again low, med and high turn-angle distribution objects
+low_ta_KJ_bot_d <- update_vonmises(
+  dist = full_dry_1$ta_,
+  beta_cos_ta = full_dry_1$model$coefficients["cos_ta_"] +
+    -2 * full_dry_1$model$coefficients["cos_ta_:KJ_bot_start"])
+# med turn-angle distribution
+med_ta_KJ_bot_d <- update_vonmises(
+  dist = full_dry_1$ta_,
+  beta_cos_ta = full_dry_1$model$coefficients["cos_ta_"] +
+    0 * full_dry_1$model$coefficients["cos_ta_:KJ_bot_start"])
+# hi turn-angle distribution
+hi_ta_KJ_bot_d <- update_vonmises(
+  dist = full_dry_1$ta_,
+  beta_cos_ta = full_dry_1$model$coefficients["cos_ta_"] +
+    2 * full_dry_1$model$coefficients["cos_ta_:KJ_bot_start"])
+#data.frame for plotting
+plot_ta_KJ_bot_d <- data.frame(x = rep(NA, 100))
+# x-axis is sequence of possible step lengths
+plot_ta_KJ_bot_d$x <- seq(from = -pi, to = pi, length.out = 100)
+# y-axis is the probability density under the given gamma distribution
+# low
+plot_ta_KJ_bot_d$low <- circular::dvonmises(x = plot_ta_KJ_bot_d$x,
+                                   kappa = low_ta_KJ_bot_d$params$kappa,
+                                   mu = 0)
+# med
+plot_ta_KJ_bot_d$medium <- circular::dvonmises(x = plot_ta_KJ_bot_d$x,
+                                      kappa = med_ta_KJ_bot_d$params$kappa,
+                                      mu = 0)
+
+# hi
+plot_ta_KJ_bot_d$high <- circular::dvonmises(x = plot_ta_KJ_bot_d$x,
+                                    kappa = hi_ta_KJ_bot_d$params$kappa,
+                                    mu = 0)
+# Pivot from wide to long data
+plot_ta_KJ_bot_d <- plot_ta_KJ_bot_d %>%
+  pivot_longer(cols = -x)
+```
+
+Prepare the plot of *KJ_bot* vs *ta\_*
+
+```{r}
+p_ta_KJ_bot_dry <- ggplot(plot_ta_KJ_bot_d, aes(x = x, y = value,
+                                          color = factor(name))) +
+  geom_line(linewidth = 1) +
+  scale_color_manual(name = "Fruit energy",
+                     breaks = c("low", "medium", "high"),
+                     values = c("gray85", "gray50", "gray20")) +
+  scale_x_continuous(breaks = c(-pi, -pi/2, 0, pi/2, pi),
+                     labels = c(expression(-pi, -pi/2, 0, pi/2, pi))) +
+  labs(x = "Turn Angle (radians)", y = "", 
+       title = "Phenology fruits’ energetic content") +
+  theme_classic() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio = 1,
+        plot.title = element_text(size = 20, hjust = .5),
+        axis.text.y = element_text(size = 18, color = "black"),
+        axis.text.x = element_text(size = 18, color = "black"),
+        axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 20),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 18),
+        strip.text = element_text(size = 12),
+        legend.margin = margin(t = 0, r = 0, b = 0, l = 0))
+```
+
+#### In @fig-KJ_bot_mov_dry we can see that there is a significant effect of the fruits energetic content on the turn angles, with movement more directed where the fruits energetic content is higher.
+
+```{r}
+#| label: fig-KJ_bot_mov_dry
+#| fig-width: 7
+#| fig-asp: 6 
+#| fig-alt: |
+#|   A plot showing how number of fruits energetic content affected both step lengths and turn angles in the rainy season
+#| fig-cap: |
+#|       Interaction between number of fruits energetic content (KJ) and both step lengths and turn angles in the rainy season 
+#| warning: FALSE  
+p_ta_KJ_bot_dry
+```
+
+# 4. Conclusions
+
+Our integrated step selection function models, fitted using predicted social and environmental landscapes, revealed season-specific drivers of BLT movement. During the rainy season, we found that BLTs moved toward areas with higher densities of known feeding trees (coeff. = 0.522, *z* = 6.93, *p* \< 0.001), taller canopies (coeff. = 0.200, *z* = 3.29, *p* = 0.001), and higher long call emission (coeff. = 0.202, *z* = 3.57, *p* \< 0.001). When starting from areas with higher densities of known fruiting trees, BLT movement was more tortuous (coeff. = –0.206, *z* = –3.07, *p* = 0.002) and the group took shorter steps, suggesting foraging within resource-rich patches. Additionally, BLT movement steps were longer and marginally more directed when moving from areas associated with higher energy expenditure, suggesting a move away from areas where movement incurs high costs.
+
+During the dry season, we found that BLTs moved toward areas with higher densities of known feeding trees (coeff. = 0.340, *z* = 3.63, *p* \< 0.001) and taller canopies (coeff. = 0.271, *z* = 4.67, *p* \< 0.001). They turned more (coeff. = –0.238, *z* = –3.17, *p* = 0.002) and took shorter steps when moving from areas where alarm calls were emitted more frequently. We also found that BLTs moved with more turns (i.e. change of direction) from areas with lower long call activity (coeff. = –0.223, *z* = –3.00, *p* = 0.003) but showed more straight movements when moving from areas where fruits had higher energetic content (coeff. = 0.343, *z* = 2.02, *p* = 0.044).
+
+Overall, our findings reveal that BLTs integrate spatial memory, structural habitat cues, energetic state, and social signalling to guide movement decisions in a complex and fluctuating environment. In a small, high-density forest fragment, these interacting drivers allow individuals to navigate spatial and temporal variation in both ecological opportunity and social pressure. This study underscores the importance of considering multiple behavioural and ecological dimensions in understanding primate route planning, providing new insight into how cognitive, social, and environmental processes jointly shape movement in seasonal forest fragments.
+
+### References
