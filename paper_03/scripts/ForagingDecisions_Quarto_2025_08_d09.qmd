@@ -1,0 +1,1105 @@
+---
+title: "Foraging Strategies of an Endangered Frugivorous-faunivorous Forest Especialist"
+author: "Felipe Bufalo, Gabriel Pavan Sabino, Luca Borger, Laurence Culot"
+format: docx
+editor: visual
+bibliography: references.bib
+---
+
+Load packages
+
+```{r}
+#| output: FALSE
+library(DHARMa)
+library(mgcViz)
+library(gridExtra)
+library(grid)
+library(cowplot)
+library(dplyr)
+library(mgcv)
+library(lubridate)
+library(ggplot2)
+library(wiqid)
+library(ggsignif)
+library(patchwork)
+library(lme4)
+library(lmerTest)
+library(MASS)
+library(car)
+library(ggrepel)
+```
+
+Load data
+
+```{r}
+load("foragingDecisions_FB_2025_08_d07.rda")
+```
+
+## In this script, we explore the foraging patterns of BLTs in a 100ha forest fragment in Guareí - SP. Here, we make available the steps of data management and analyses performed, so it is easy to check how the investigation has been conducted.
+
+## **Objectives:**
+
+Investigate what factors drive BLT resource selection and consumption in an Atlantic Forest fragment.
+
+## **Specific objectives**
+
+1.  Investigate if the abundance and the nutritional characteristics of fruit species influence the patterns of fruit consumption in a forest fragment.
+
+2.  Investigate if the foraging strategies for nutrients vary along the day in a forest fragment.
+
+## **Hypotheses**
+
+H1.A –Abundance hypothesis: Considering that resource abundance is a key driver of foraging behavior in frugivorous primates, species with higher densities are more easily encountered and thus might provide more consistent foraging opportunities, reduce search time and increase feeding efficiency [@parrish2017; @trapanese2019]. Therefore, we predict a higher number of frugivory per day on fruit species with higher densities (higher number of trees/ha).
+
+**H1.B** - H1.B –Energy hypothesis: Alternatively, primates are expected to optimize their energy intake by prioritizing resources with higher energetic returns [@beeby2023; @carlson2013]. Thus, selecting high-energy food items, such as fruits, might allow for more efficient foraging, especially in energy-limited environments or when feeding competition is high. Consequently, we predict a higher number of frugivory per day on fruit species with higher energetic content (KJ/100g).
+
+H2 –Travel cost hypothesis: Foraging decisions often reflect a trade-off between energy intake and travel cost [@lambert2015; @macarthur1966]. In patchy environments, frugivores are expected to maximize their net energy gain by adjusting their patch residence time based on travel distance and resource quality [@li2020; @tonos2024; @trapanese2019]. We hypothesize that BLTs aim to optimize energy acquisition through frugivory against travel costs and hence adjust the duration of visits to fruit trees according to the traveling distances necessary to reach them and the amount of energy each fruit provides. Consequently, we predict BLTs to spend more time in frugivory after traveling longer distances traveling since last frugivory event. We also expect BLTs to spend more time in less energetic fruiting trees, assuming the cost of finding an alternative patch may outweigh the benefits.
+
+H3 – Seasonal diet selection hypothesis: Seasonal shifts in resource availability lead to corresponding changes in foraging strategies and diet composition [@bauld2025; @hemingway2005; @stone2006]. As a consequence of shortages of specific food items in resource-scarce periods, primates might show sustained foraging efforts throughout the day to guarantee the necessary daily nutrients, while periods of abundance allow for more flexible feeding schedules [@brown1990; @peres1994; @terborgh1984]. This, we hypothesize that BLTs adjust their foraging effort in response to seasonal variation in the availability of food resources. Specifically, if the availability and production of their main feeding resources (i.e., invertebrates and fruits) vary seasonally, we expect the rainy season to be associated with (1) a greater invertebrate biomass, (2) a higher richness of invertebrate morphospecies, (3) a increased fruit productivity, and (4) a higher number of trees fructifying. Then, if there was an effect of seasonality on the availability of fruits and animal prey, we expected to observe differences on the amount of feeding behaviors performed by the group along the day between seasons. In other words, in the dry season, expected to present lower availability of feeding resources, we expected to observe BLTs performing higher proportions of frugivory and faunivory in our scans throughout the day, indicating a more constant effort to locate and consume resources. Contrastingly, in the rainy season (corresponding to the season with higher availability of invertebrates and fruits), we expected to observe more variation on the proportions of frugivory and faunivory scans along the day, indicating a lower effort necessary for the location of feeding resources.
+
+H4 – The recharge hypothesis: After a prolonged overnight fast, frugivores often seek out energy-dense foods to rapidly restore energy balance. In primates, this early-morning “recharging” has been linked to strategic foraging, such as the planning of breakfast time, type, and location observed in wild chimpanzees [@janmaat2014]. Consequently, we expected BLTs to prioritize the consumption of fruits with higher energetic content early morning than in the rest of the day. Thus, we predicted a higher proportion of scans in fruits with higher energetic content in the morning, after spending the night at a sleeping site, while the consumption of fruits with lower energy values to be constant along the day.
+
+## **Methods - data collection**
+
+Detailed methods can be found in the manuscript. Briefly, we collected data on a group of BLTs composed of 7 individuals for 12 full days (from sleeping site to sleeping site) in the Rainy season (between Dec/22 and Feb/23), and 12 full days in the Dry season (Jul/24 to Sep/24).
+
+```{r}
+levels(as.factor(behav$date))
+```
+
+During group sampling, we recorded, every 5 minutes, both the behaviors displayed by the individuals and the group, though scan sampling, and recorded the GPS position of the group.
+
+```{r}
+head(behav)
+```
+
+We recorded all events of frugivory through all occurrence sampling, registering the GPS position of the plant, its fruit productivity, the time BLTs spent in the tree, and collected its fruits for nutritional analyses.
+
+```{r}
+head(fruit)
+head(adlib) 
+
+# Calculate frugivory duration as the difference in time between consecutive 
+# adlib$duration == "end_fru" and adlib$duration == "begin_fru"
+
+# Filter for fruit consumption events and compute time difference
+adlib_fru <- adlib %>%
+  filter(duration %in% c("begin_fru", "end_fru")) %>%
+  mutate(datetime = lubridate::dmy(date) + lubridate::hms(time)) %>%
+  arrange(obs, sp, datetime) %>%
+  group_by(obs, sp) %>%
+  mutate(fru_dur = ifelse(duration == "end_fru", 
+                           as.numeric(datetime - lag(datetime)), NA)) %>%
+  ungroup() %>%
+  filter(duration == "end_fru") %>%
+  dplyr::select(-full_day, -duration, -receiver, -modifier, -datetime) %>% 
+  na.omit(fru_dur) %>% 
+  mutate(date = dmy(date)) %>%  # Convert to Date format
+  arrange(date) %>% 
+  mutate(fru_id = row_number())
+head(adlib_fru)# Duration of frugivory is now on fru_dur, in minutes
+```
+
+We performed a phenology experiment every 14 days, sampling a total of 648 trees from 71 species and 29 families that could be consumed by BLTs. The sampled trees belonged to 25 30m x 10m botany plots distributed along the home range of the group. The plots were regularly distributed along the area, 150m apart from each other. During each visit, we estimated the productivity of reproductive organs in the selected trees. Whenever available, we collected fruits for nutritional analyses.
+
+```{r}
+glimpse(pheno)
+head(trees)
+```
+
+To estimate the biomass of invertebrates, we installed 3 pitfall traps (one meter from each other) on each of the botany plots. We checked the traps every week for the presence of invertebrates, which were than identified to order and morphospecies, dried, and finally weighted.
+
+```{r}
+head(msp)
+head(insect_biomass)
+```
+
+All data is available as supporting information in the manuscript document.
+
+## Hypothesis testing:
+
+H1.A –Abundance hypothesis: Considering that resource abundance is a key driver of foraging behavior in frugivorous primates, species with higher densities are more easily encountered and thus might provide more consistent foraging opportunities, reduce search time and increase feeding efficiency [@parrish2017; @trapanese2019]. Therefore, we predict a higher number of frugivory per day on fruit species with higher densities (higher number of trees/ha).
+
+**H1.B** - H1.B –Energy hypothesis: Alternatively, primates are expected to optimize their energy intake by prioritizing resources with higher energetic returns [@beeby2023; @carlson2013]. Thus, selecting high-energy food items, such as fruits, might allow for more efficient foraging, especially in energy-limited environments or when feeding competition is high. Consequently, we predict a higher number of frugivory per day on fruit species with higher energetic content (KJ/100g).
+
+I will start by summarizing the number of frugivory per day
+
+```{r}
+# Compute density of trees
+tree_count <- trees %>%
+  count(sp, name = "count_id") %>%
+  mutate(tree_den = count_id/((10*10*75)/10000))#We have 75 10mx10m plots
+head(tree_count)
+
+# Compute the energetic content for each fruit
+energy_df <- fruit %>%
+  dplyr::select(sp, mean_ART, mean_Lipid, mean_Protein, tot_dry_mass, n_fruits_sampled) %>%
+  mutate(
+    fruit_dry_mass = tot_dry_mass / n_fruits_sampled,
+    lipids_KJ = (35 * mean_Lipid) / 100,
+    protein_KJ = (14.1 * mean_Protein) / 100,
+    carbohydrates_KJ = (15.1 * mean_ART) / 100,
+    KJ = lipids_KJ + protein_KJ + carbohydrates_KJ
+  ) %>%
+  dplyr::select(sp, KJ) %>% 
+  na.omit(energy_df)
+head(energy_df)
+
+# Merge tree density and energetic content with adlib_fru
+adlib_fru <- adlib_fru %>%
+  left_join(tree_count %>% dplyr::select(sp, tree_den), by = "sp") %>%
+  left_join(energy_df, by = "sp")
+
+# Prepare the data frame, summarizing the number of visits and mean duration
+n_fru_day <- adlib_fru %>% 
+    group_by(sp, date, Season, KJ, tree_den) %>% 
+    summarize(n_vis = n_distinct(fru_id), 
+              av_fru_dur = mean(fru_dur, na.rm = TRUE),
+              tot_fru_dur = sum(fru_dur, na.rm = TRUE),
+              .groups = "drop")
+n_fru_day$sp <- as.factor(n_fru_day$sp)
+n_fru_day$date <- as.factor(n_fru_day$date)
+n_fru_day$Season <- factor(n_fru_day$Season, c("Rainy", "Dry"))
+n_fru_day <- na.omit(n_fru_day)
+head(n_fru_day)
+```
+
+I will fit a Poisson glmm with both density of trees "log(tree_den)" and energy "log(KJ_fruit)" as predictors.
+
+Since we have repeted measures for fruit species (each sp can be visited many times in a day and have different number of visits between days), I will include sp as random effect in the model. I will also try including date as random effect.
+
+```{r}
+summary(glmm_nvis_full <- glmer(n_vis ~ log(tree_den) * log(KJ) + (1|sp), 
+                                family = poisson(link = "log"), 
+                                data = n_fru_day))
+plotQQunif(glmm_nvis_full)
+```
+
+Since dispersion assumption is violated, I will fit a negative binomial model
+
+```{r}
+summary(glmm_nvis_nb_full <- glmer.nb(n_vis ~ log(tree_den) * log(KJ) + (1|sp), 
+                                 data = n_fru_day))
+plotQQunif(glmm_nvis_nb_full)
+drop1(glmm_nvis_nb_full, test = "Chisq") #Remove the interaction
+
+summary(glmm_nvis_nb_noint <- glmer.nb(n_vis ~ log(tree_den) + log(KJ) + (1|sp), 
+                                      data = n_fru_day))
+vif(glmm_nvis_nb_noint)
+plotQQunif(glmm_nvis_nb_noint)
+drop1(glmm_nvis_nb_noint, test = "Chisq")
+
+summary(glmm_nvis_nb_simp <- glmer.nb(n_vis ~ log(KJ) + (1|sp), 
+                                      data = n_fru_day))
+plotQQunif(glmm_nvis_nb_simp)
+AICtable(AIC(glmm_nvis_nb_noint, glmm_nvis_nb_simp))
+
+round(confint(glmm_nvis_nb_simp),3)
+```
+
+Create a dataframe with predictions from the model for plotting
+
+```{r}
+n_fru_day$predicted_n_vis <- predict(glmm_nvis_nb_noint, type = "response")
+```
+
+Code for the plot
+
+```{r}
+plot_H1 <- ggplot(n_fru_day, aes(x = log(KJ), y = predicted_n_vis)) +
+  geom_point(alpha = 0.4, color = "steelblue") +  
+  geom_smooth(method = "lm", color = "black", linetype = "solid") + 
+  labs(x = "log(Fruit energy)", y ="Predicted number of frugivory per day") +
+  theme_classic() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(size = 15, color = "black"),
+    axis.text.x = element_text(size = 15, color = "black"),
+    axis.title.y = element_text(size = 20, color = "black"),
+    axis.title.x = element_text(size = 20, color = "black"),
+    aspect.ratio = 1,
+    plot.title = element_text(size = 20, color = "black"),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"))
+plot_H1
+```
+
+Based on the result of our glmm, we can confirm hypotheses H1.B. BLTs seem to visit, daily, fruits more energetic across the area. There was no effect of the density of the fruit species on the frequency of daily visits.
+
+H2 –Travel cost hypothesis: Foraging decisions often reflect a trade-off between energy intake and travel cost [@lambert2015; @macarthur1966]. In patchy environments, frugivores are expected to maximize their net energy gain by adjusting their patch residence time based on travel distance and resource quality [@li2020; @tonos2024; @trapanese2019]. We hypothesize that BLTs aim to optimize energy acquisition through frugivory against travel costs and hence adjust the duration of visits to fruit trees according to the traveling distances necessary to reach them and the amount of energy each fruit provides. Consequently, we predict BLTs to spend more time in frugivory after traveling longer distances traveling since last frugivory event. We also expect BLTs to spend more time in less energetic fruiting trees, assuming the cost of finding an alternative patch may outweigh the benefits.
+
+To be able to test if time spent in frugivory could be a consequence of the distances traveled, I first need to calculate the distances traveled before each frugivory event.
+
+```{r}
+# Convert date and datetime to proper date/time formats
+behav <- behav %>%
+  mutate(date = dmy(date), datetime = dmy_hm(datetime)) %>%
+  arrange(date, datetime)                       
+
+# Now create dist_fru and fru_dist_ct with proper ordering
+behav <- behav %>%
+  arrange(date, datetime) %>%
+  mutate(dist_fru = ifelse(!is.na(fru_id), dist_trav, NA_real_)) %>%
+  group_by(date) %>%
+  mutate(
+    fru_dist_ct = {
+      res <- rep(NA_real_, n())
+      fru_idx <- which(!is.na(fru_id))
+      if(length(fru_idx) > 0){
+        # dist_trav of first row in the date
+        first_row_dist <- dist_trav[1]
+        
+        # For first fru_id: difference from first row's dist_trav
+        first_fru <- fru_idx[1]
+        res[first_fru] <- dist_fru[first_fru] - first_row_dist
+        
+        # For subsequent fru_id rows, difference between consecutive dist_fru
+        if(length(fru_idx) > 1){
+          diffs <- diff(dist_fru[fru_idx])
+          res[fru_idx[-1]] <- diffs
+        }
+      }
+      res
+    }
+  ) %>%
+  ungroup() %>% 
+  dplyr::select(-dist_fru)
+```
+
+Make sure there are no NA rows in the data
+
+```{r}
+adlib_fru_H2 <- na.omit(adlib_fru)
+```
+
+Merge the distances traveled with adlib_fru_H2
+
+```{r}
+# Select only the relevant columns from behav for the join
+behav_dist <- behav %>% 
+  dplyr::select(fru_id, dist_trav = fru_dist_ct) %>%  
+  distinct(fru_id, .keep_all = TRUE)
+```
+
+Join to adlib_fru_H2 by fru_id, adding dist_trav column
+
+```{r}
+adlib_fru_H2 <- adlib_fru_H2 %>%
+  left_join(behav_dist, by = "fru_id")
+adlib_fru_H2 <- na.omit(adlib_fru_H2)
+```
+
+I will first check if there are differences on the duration of visits between different sp
+
+I will include a random factor for tree id (column obs in the data frame) to account for possible differences on frugivory duration between different trees for the same sp
+
+```{r}
+summary(lm_fru_dur <- lmer(log(fru_dur) ~ sp + (1|obs), data = adlib_fru_H2))
+plotQQunif(lm_fru_dur)
+```
+
+There is no significant difference on frugivory duration between sp
+
+Check data distribution before fitting the model to test H2
+
+```{r}
+{layout="[1,1]"}
+boxcox(fru_dur ~ dist_trav + log(KJ), data = adlib_fru_H2)
+boxcox(fru_dur ~ dist_trav + log(KJ), data = adlib_fru_H2, 
+       lambda = seq(-.5, 0, 0.1))
+```
+
+Fit the model
+
+```{r}
+summary(lmm_fru_dur_full <- lmer(fru_dur^-.3 ~  dist_trav +
+                                   log(KJ) + (1|obs),
+                                 data = adlib_fru_H2))
+plotQQunif(lmm_fru_dur_full)
+vif(lmm_fru_dur_full)
+round(confint(lmm_fru_dur_full),3)
+```
+
+I will use the step function to run a backward stepwise model selection to identify the best-fit model for predicting the power transformed amount of time spent on fruit feeding trees
+
+```{r}
+step(lmm_fru_dur_full)# There is no model better than the null model...
+final_model<-lmer(fru_dur^-0.3 ~ (1 | obs), data = adlib_fru_H2)
+length(fixef(final_model)) + length(VarCorr(final_model)) + 1  # +1 for residual variance
+mod1 <- lm(fru_dur^-0.3 ~ log(dist_trav+.1), data = adlib_fru_H2)
+mod2 <- lm(fru_dur^-0.3 ~ 1, data = adlib_fru_H2)
+AICtable(AIC(lmm_fru_dur_full, mod1, mod2, final_model))
+```
+
+I will keep the next chunks in case we find a solution for this hypothesis. In the manuscript I will refuse H2 by now and report the results of the full model and from the step (as supp. material).
+
+```{r}
+summary(lmm_fru_dur_simp <- lmer(fru_dur^-.3 ~ log(dist_trav+.1) *
+                                   log(KJ) + (1|obs),
+                                 data = adlib_fru_H2))
+plotQQunif(lmm_fru_dur_simp)
+vif(lmm_fru_dur_simp)
+round(confint(lmm_fru_dur_simp),3)
+```
+
+Add model predictions to the dataframe for plotting
+
+```{r}
+adlib_fru_H2$predicted_vis_dur <- predict(lmm_fru_dur_simp, type = "response")
+```
+
+Code for the plot
+
+```{r}
+plot_H2 <- ggplot(adlib_fru_H2, aes(x = log(dist_trav+.1), y = predicted_vis_dur)) +
+  geom_point(alpha = 0.4, color = "steelblue") +  
+  geom_smooth(method = "lm", color = "black", linetype = "dashed") + 
+  labs(x = "log(Distance traveled + 0.1)", y ="Predicted duration of visits^-0.3") +
+  theme_classic() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(size = 15, color = "black"),
+    axis.text.x = element_text(size = 15, color = "black"),
+    axis.title.y = element_text(size = 20, color = "black"),
+    axis.title.x = element_text(size = 20, color = "black"),
+    aspect.ratio = 1,
+    plot.title = element_text(size = 20, color = "black"),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"))
+plot_H2
+```
+
+Based on the results of our models, we can refute H2. There no effect of both energetic content or density of trees on the time BLTs spent on frugivory, in a daily basis.
+
+Create the figure with both plots in the same page
+
+```{r}
+p <- plot_H1 + plot_H2
+p 
+```
+
+H3 – Seasonal diet selection hypothesis: Seasonal shifts in resource availability lead to corresponding changes in foraging strategies and diet composition [@bauld2025; @hemingway2005; @stone2006]. As a consequence of shortages of specific food items in resource-scarce periods, primates might show sustained foraging efforts throughout the day to guarantee the necessary daily nutrients, while periods of abundance allow for more flexible feeding schedules [@brown1990; @peres1994; @terborgh1984]. This, we hypothesize that BLTs adjust their foraging effort in response to seasonal variation in the availability of food resources. Specifically, if the availability and production of their main feeding resources (i.e., invertebrates and fruits) vary seasonally, we expect the rainy season to be associated with (1) a greater invertebrate biomass, (2) a higher richness of invertebrate morphospecies, (3) a increased fruit productivity, and (4) a higher number of trees fructifying. Then, if there was an effect of seasonality on the availability of fruits and animal prey, we expected to observe differences on the amount of feeding behaviors performed by the group along the day between seasons. In other words, in the dry season, expected to present lower availability of feeding resources, we expected to observe BLTs performing higher proportions of frugivory and faunivory in our scans throughout the day, indicating a more constant effort to locate and consume resources. Contrastingly, in the rainy season (corresponding to the season with higher availability of invertebrates and fruits), we expected to observe more variation on the proportions of frugivory and faunivory scans along the day, indicating a lower effort necessary for the location of feeding resources.
+
+## Seasonal comparison - invertebrates
+
+## Are there differences on the biomass (g) of invertebrates between seasons?
+
+Prepare the data
+
+```{r}
+insect_biomass$Season <- factor(insect_biomass$Season, 
+                                levels = c("Rainy", "Dry"))
+shapiro.test(insect_biomass$mean_dry_weight)
+hist(insect_biomass$mean_dry_weight) 
+```
+
+Fit the model
+
+```{r}
+summary(bio_lm <- lm(mean_dry_weight ~ Season, data = insect_biomass))
+plotQQunif(bio_lm) 
+round(confint(bio_lm),3)
+```
+
+Code for the plot
+
+```{r}
+biomass <- ggplot(insect_biomass, aes(x = Season, y = mean_dry_weight)) +
+  geom_boxplot(outliers = FALSE) +  
+  geom_jitter(width = 0.2, size = 2, shape = 21, aes(fill = Season),
+              stroke = 0.5, color = "black", alpha = 0.7) +
+  geom_signif(comparisons = list(c("Rainy", "Dry")),
+              map_signif_level = TRUE, 
+              y_position = max(insect_biomass$mean_dry_weight) + 0.01,
+              annotations = "p = 0.002**") +
+  scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+  labs(x = "Season", y = "Biomass of invertebrates (g)") +
+  theme_classic() +
+  theme(axis.title.y = element_text(size = 18, color = "black"),
+        #axis.title.x = element_text(size = 18, color = "black"),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.y = element_text(size = 14, color = "black"),
+        legend.position = "none",
+        aspect.ratio = 1) +
+  scale_fill_manual(values = c("Rainy" = "grey20", "Dry" = "indianred3")) 
+```
+
+## Are there differences on the richness of morphospecies of invertebrates between seasons?
+
+Prepare the data
+
+```{r}
+unique_morpho_counts <- msp %>%
+  group_by(Season, plot) %>%
+  summarise(unique_morpho = n_distinct(morpho), .groups = "drop")
+unique_morpho_counts$Season <- factor(unique_morpho_counts$Season, 
+                                      levels = c("Rainy", "Dry"))
+```
+
+Fit glm poisson model
+
+```{r}
+summary(msp_glm <- glm(unique_morpho ~ Season,
+               family = poisson(link = "log"),
+               data = unique_morpho_counts))
+plotQQunif(msp_glm)
+round(confint(msp_glm),3)
+```
+
+Add predicted values to the dataset
+
+```{r}
+unique_morpho_counts <- unique_morpho_counts %>%
+  mutate(predicted = predict(msp_glm, type = "response"))
+```
+
+Code for the plot
+
+```{r}
+mspp <- ggplot(unique_morpho_counts, aes(x = Season, y = unique_morpho)) +
+  geom_boxplot(outlier.shape = NA) +  # Base boxplot
+  geom_boxplot(outliers = FALSE) +  
+  geom_jitter(width = 0.2, size = 2, shape = 21, aes(fill = Season),  
+              stroke = 0.5, color = "black", alpha = 0.7) + 
+  geom_signif(comparisons = list(c("Rainy", "Dry")), map_signif_level = TRUE,
+              y_position = max(unique_morpho_counts$unique_morpho) + 0.01,
+              annotations = "p < 0.001***") +
+  labs(x = "Season", y = "Richness of morphospecies") +
+  theme_classic() +
+  scale_y_continuous(labels = scales::label_number(accuracy = 0.1)) +
+  scale_fill_manual(values = c("Rainy" = "grey20", "Dry" = "indianred3")) +
+  theme(
+    axis.title.y = element_text(size = 18, color = "black"),
+    #axis.title.x = element_text(size = 18, color = "black"),
+    axis.title.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 14, color = "black"),
+    aspect.ratio = 1,
+    legend.position = "none")
+```
+
+## Are there differences on the productivity of fruits (Fournier corrected by dbh) between seasons?
+
+Prepare the data
+
+```{r}
+# Step 1: correct the productivity categories by DBH
+# Method not applyed to palms (e.g. Syagrus romanzoffiana)
+head(pheno) # Our phenology data frame
+pheno <- pheno %>%
+    mutate(Mat_fruit_corrected = if_else(sp == "Syagrus romanzoffiana", 
+                                         Mat_fruit, Mat_fruit * dbh))
+
+# Step 2: Compute mean_Mat_fruit by Season and sp
+mean_mat_fruit <- pheno %>%
+    filter(Mat_fruit != 0) %>% # Filter rows where Mat_fruit != 0
+    group_by(Season, plot_id, sp, id) %>%
+    summarize(
+        mean_Mat_fruit = mean(Mat_fruit_corrected, na.rm = TRUE),
+        .groups = "drop")
+mean_mat_fruit$Season <- factor(mean_mat_fruit$Season, 
+                                levels = c("Rainy", "Dry"))
+head(mean_mat_fruit)
+```
+
+Check data distribution
+
+```{r}
+{layout="[1,1]"}
+boxcox(mean_Mat_fruit ~ Season, data = mean_mat_fruit)
+boxcox(mean_Mat_fruit ~ Season, data = mean_mat_fruit, 
+       lambda = seq(0, 1, 0.1))
+```
+
+```{r}
+shapiro.test(mean_mat_fruit$mean_Mat_fruit^.4)
+```
+
+```{r}
+hist(mean_mat_fruit$mean_Mat_fruit^.4)
+```
+
+Fit the model
+
+```{r}
+summary(fruit_lm <- lm(mean_Mat_fruit^.4 ~ Season, data = mean_mat_fruit))
+plotQQunif(fruit_lm)
+round(confint(fruit_lm),3)
+```
+
+Code for the plot
+
+```{r}
+fruitprodp <- ggplot(mean_mat_fruit, aes(x = Season, y = mean_Mat_fruit^.4)) +
+  geom_boxplot(outliers = FALSE) +  
+  geom_jitter(width = 0.2, size = 2, shape = 21, aes(fill = Season),
+              stroke = 0.5, color = "black", alpha = 0.7) +
+  geom_signif(comparisons = list(c("Rainy", "Dry")),
+              map_signif_level = TRUE, 
+              y_position = max(mean_mat_fruit$mean_Mat_fruit^.4) + 0.01,
+              annotations = "p = 0.963") +
+  scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+  labs(x = "Season", y = "Productivity of fruits^.4") +
+  theme_classic() +
+  theme(axis.title.y = element_text(size = 18, color = "black"),
+        axis.title.x = element_blank(),
+        axis.text = element_text(size = 14, color = "black"),
+        legend.position = "none",
+        aspect.ratio = 1) +
+  scale_fill_manual(values = c("Rainy" = "grey20", "Dry" = "indianred3")) 
+```
+
+## Are there differences on the number of trees with fruits between seasons?
+
+Prepare the data
+
+```{r}
+unique_fruit_counts <- pheno %>%
+  filter(Mat_fruit != 0) %>%  
+  group_by(Season, plot_id) %>%
+  summarise(
+    unique_id = n_distinct(id),  
+    .groups = "drop")
+
+unique_fruit_counts$Season <- factor(unique_fruit_counts$Season, 
+                                     levels = c("Rainy", "Dry"))
+
+unique_fruit_counts$unique_id <- as.numeric(unique_fruit_counts$unique_id)
+head(unique_fruit_counts)
+```
+
+Fit the model
+
+```{r}
+summary(fsp_glm <- glm(unique_id ~ Season,
+                       family = poisson(link = "log"),
+                       data = unique_fruit_counts))
+plotQQunif(fsp_glm)
+round(confint(fsp_glm),3)
+```
+
+Add predicted values to the dataset
+
+```{r}
+unique_fruit_counts <- unique_fruit_counts %>%
+  mutate(predicted = predict(fsp_glm, type = "response"))
+```
+
+Code for the plot
+
+```{r}
+fspp <- ggplot(unique_fruit_counts, aes(x = Season, y = unique_id)) +
+  geom_boxplot(outlier.shape = NA) +  # Base boxplot
+  geom_boxplot(outliers = FALSE) +  
+  geom_jitter(width = 0.2, size = 2, shape = 21, aes(fill = Season),  
+              stroke = 0.5, color = "black", alpha = 0.7) + 
+  geom_signif(comparisons = list(c("Rainy", "Dry")), map_signif_level = TRUE,
+              y_position = max(unique_fruit_counts$unique_id) + .5,
+              annotations = "p = 0.924") +
+  labs(x = "Season", y = "Number of trees with fruits") +
+  theme_classic() +
+  scale_fill_manual(values = c("Rainy" = "grey20", "Dry" = "indianred3")) +
+  scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+  theme(
+    axis.title.y = element_text(size = 18, color = "black"),
+    axis.title.x = element_blank(),
+    axis.text = element_text(size = 14, color = "black"),
+    aspect.ratio = 1,
+    legend.position = "none")
+```
+
+Create a unique plot for all tests
+
+```{r}
+p <- biomass + mspp + fruitprodp + fspp
+p 
+```
+
+There are differences on the availability of invertebrates between seasons, but no such pattern for fruits.
+
+I will run a Principal Component Analysis (PCA) to have a look at the distribution of fruits in terms of nutritional content between seasons.
+
+```{r}
+# Step 1: Combine all fruit with seasonal info
+fruit_final <- fruit %>%
+  inner_join(fruit_season, by = "sp") %>%
+  distinct(sp, Season, .keep_all = TRUE) %>%
+  mutate(BLT = ifelse(is.na(BLT), "Not consumed", BLT))
+
+# Step 2: Calculate nutrient proportions
+fruit_pca_data <- fruit_final %>%
+  dplyr::select(Season, sp, BLT, Sugar = mean_ART, Lipid = mean_Lipid, 
+                Protein = mean_Protein) %>%
+  filter(!is.na(Sugar), !is.na(Lipid), !is.na(Protein)) %>%
+  distinct() %>%
+  rowwise() %>%
+  mutate(total = Sugar + Lipid + Protein,
+         prop_Sugar = Sugar / total,
+         prop_Lipid = Lipid / total,
+         prop_Protein = Protein / total) %>%
+  ungroup()
+
+# Step 3: Run global PCA
+pca_all <- prcomp(fruit_pca_data[, c("prop_Sugar", "prop_Lipid", 
+                                     "prop_Protein")], scale. = TRUE)
+
+summary(pca_all)
+pca_all$rotation
+
+scores <- as.data.frame(pca_all$x[, 1:2])
+colnames(scores) <- c("PC1", "PC2")
+scores$sp <- fruit_pca_data$sp
+scores$Season <- fruit_pca_data$Season
+scores$BLT <- fruit_pca_data$BLT
+
+# Step 4: Loadings for biplot
+loadings <- as.data.frame(pca_all$rotation[, 1:2])
+loadings$trait <- rownames(loadings)
+
+# Scale by eigenvalues (standard deviations of PC axes)
+loadings$PC1 <- loadings$PC1 * pca_all$sdev[1]
+loadings$PC2 <- loadings$PC2 * pca_all$sdev[2]
+
+# Eigenvalues from PCA
+eig_vals <- (pca_all$sdev)^2
+
+loadings <- loadings %>%
+  mutate(
+    # Scale each PC loading by its PC eigenvalue (length scaling)
+    end_x = PC1 * eig_vals[1],
+    end_y = PC2 * eig_vals[2],
+    # Label position: slightly below arrow tip by shifting y down a bit
+    label_x = end_x,
+    label_y = end_y - 0.1  # shift downward (adjust 0.1 to taste)
+  )
+
+# Step 5: Global axis limits
+x_limits <- range(scores$PC1) + c(-0.5, 0.5)
+y_limits <- range(scores$PC2) + c(-0.1, 0.1)
+
+# Step 6: Plot loop by season
+biplot_list <- list()
+for (s in unique(scores$Season)) {
+  df <- scores %>% filter(Season == s)
+  
+  p <- ggplot(df, aes(x = PC1, y = PC2)) +
+    geom_point(aes(shape = BLT, fill = BLT), size = 3, color = "black") +
+    scale_shape_manual(values = c("Consumed" = 21, "Not consumed" = 25)) +
+    scale_fill_manual(values = c("Consumed" = "grey40", "Not consumed" = "grey80")) +
+    geom_text_repel(aes(label = paste0("italic('", sp, "')")), 
+                    parse = TRUE, size = 3, max.overlaps = Inf) +
+    geom_segment(data = loadings,
+                 aes(x = 0, y = 0, xend = end_x, yend = end_y),
+                 arrow = arrow(length = unit(0.2, "cm")),
+                 color = "indianred3") +
+    geom_text(data = loadings,
+              aes(x = label_x, y = label_y, label = trait),
+              color = "indianred3", size = 4, fontface = "bold") +
+    annotate("text", x = x_limits[1] - 0.03 * diff(x_limits),
+             y = y_limits[2] - 0.01 * diff(y_limits),
+             label = paste(s, "season"),
+             hjust = 0, vjust = 1, size = 5, color = "black") +
+    coord_cartesian(xlim = x_limits, ylim = y_limits) +
+    theme_bw() +
+    theme(
+      panel.grid = element_blank(),
+      axis.text = element_text(size = 15, color = "black"),
+      axis.title = element_blank(),
+      aspect.ratio = .5,
+      plot.title = element_blank(),
+      axis.ticks = element_line(color = "black")
+    )
+  
+  biplot_list[[s]] <- p
+}
+
+# Step 7: Combine plots and add shared axis and legend
+combined <- plot_grid(
+  biplot_list$Rainy + theme(legend.position = "none"),
+  biplot_list$Dry + theme(legend.position = "none"),
+  ncol = 1,
+  align = "v")
+
+# Extract legend from one plot
+legend <- get_legend(
+  biplot_list$Rainy +
+    theme(legend.position = "bottom",
+          legend.justification = "center",
+          legend.box.just = "center",
+          legend.title = element_blank(),
+          legend.text = element_text(size = 14),
+          legend.key.size = unit(1, "cm")) +
+    guides(shape = guide_legend(title = NULL), 
+           fill = guide_legend(title = NULL)))
+
+# Add final layout with shared axis and legend
+# Final layout with axis labels showing variance explained
+final <- grid.arrange(
+  arrangeGrob(
+    combined, 
+    bottom = textGrob("PC1 (73.2%)", gp = gpar(fontsize = 20)),
+    left = textGrob("PC2 (26.8%)", rot = 90, gp = gpar(fontsize = 20), 
+                    vjust = 8)),
+  nullGrob(),
+  legend,
+  ncol = 1, nrow = 3,
+  heights = unit.c(unit(1, "npc") - unit(3, "lines"), unit(0.7, "lines"), 
+                   unit(1.5, "lines")))
+
+#Save
+# Set output file and resolution
+#tiff("fruit_pca_biplot.tiff", width = 10, height = 8, units = "in", res = 600, 
+#     compression = "lzw")
+#grid.draw(final)
+#dev.off()
+```
+
+## If there was an effect of seasonality on the availability of fruits and animal prey, we expected to observe differences on the amount of feeding behaviors performed by the group along the day between seasons. In other words, in the dry season, expected to present lower availability of feeding resources, we expected to observe BLTs performing higher proportions of frugivory and faunivory in our scans throughout the day, indicating a more constant effort to locate and consume resources. Contrastingly, in the rainy season (corresponding to the season with higher availability of invertebrates and fruits), we expected to observe more variation on the proportions of frugivory and faunivory scans along the day, indicating a lower effort necessary for the location of feeding resources.
+
+Prepare the data, starting with frugivory
+
+```{r}
+fru_bin_count <- behav %>%
+  filter(fru_bin == 1) %>%  
+  group_by(Season, hour) %>%  
+  summarise(count = n(), .groups = "drop") 
+
+fru_bin_count <- behav %>%
+  filter(fru_bin == 1) %>%  
+  group_by(Season, hour) %>%  
+  summarise(count = n(), .groups = "drop") %>%  
+  left_join(
+    behav %>%
+      group_by(Season, hour) %>%
+      summarise(total_count = n(), .groups = "drop"),
+    by = c("Season", "hour")  
+  ) %>%
+  mutate(count_ratio = count / total_count)
+fru_bin_count$Season <- factor(fru_bin_count$Season, levels = c("Rainy", "Dry"))
+```
+
+Check data distribution
+
+```{r}
+{layout="[1,1]"}
+boxcox(count_ratio ~ hour, data = fru_bin_count)
+boxcox(count_ratio ~ hour, data = fru_bin_count, lambda = seq(0, 1, 0.1))
+```
+
+```{r}
+shapiro.test(fru_bin_count$count_ratio^.7)
+```
+
+Fit the model for frugivory along the day for both seasons
+
+```{r}
+summary(gam_fru_hour <- gam(count_ratio^.7 ~ s(hour, by = Season),
+                    method = "REML",
+                    data = fru_bin_count))
+```
+
+```{r}
+gam.check(gam_fru_hour)
+```
+
+```{r}
+plotQQunif(gam_fru_hour)
+```
+
+Generate a new data frame for predictions for plotting
+
+```{r}
+newdata_fru_bin <- expand.grid(hour = seq(min(fru_bin_count$hour, na.rm = TRUE),
+                                          max(fru_bin_count$hour, na.rm = TRUE), 
+                                          length.out = 100),
+                               Season = levels(fru_bin_count$Season))
+
+# Generate predictions from the GAM model (no transformation back applied)
+predictions_fru_bin <- predict(gam_fru_hour, newdata = newdata_fru_bin, 
+                               type = "response", se.fit = TRUE)
+
+# Add predictions and confidence intervals to the new data
+newdata_fru_bin <- newdata_fru_bin %>%
+  mutate(predicted = predictions_fru_bin$fit,
+         lwr = predictions_fru_bin$fit - 1.96 * predictions_fru_bin$se.fit,
+         upr = predictions_fru_bin$fit + 1.96 * predictions_fru_bin$se.fit)
+```
+
+Code for the plot
+
+```{r}
+p_fru_bin <- ggplot() +
+  # Add predicted line and ribbon for each Season
+  geom_line(data = newdata_fru_bin,
+            aes(x = hour, y = predicted, color = Season, linetype = Season),
+            size = 1) +
+  geom_ribbon(data = subset(newdata_fru_bin, Season == "Rainy"),
+              aes(x = hour, ymin = lwr, ymax = upr, fill = Season),
+              alpha = 0.2, color = NA) +
+  # Add observed points
+  geom_point(data = fru_bin_count,
+             aes(x = hour, y = count_ratio^0.7, color = Season),
+             shape = 16, size = 2, alpha = 0.4) +
+  # Labels and scales
+  labs(x = "Time of the day", y = "(Proportion of frugivory/hour)^.7") +
+  scale_color_manual(values = c("Rainy" = "grey20", "Dry" = "indianred3")) +
+  scale_fill_manual(values = c("Rainy" = "grey20", "Dry" = "indianred3")) +
+  scale_linetype_manual(values = c("Rainy" = "solid", "Dry" = "dashed")) +
+  theme_classic() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(size = 15, color = "black"),
+    axis.text.x = element_text(size = 15, color = "black"),
+    axis.title.y = element_text(size = 20),
+    axis.title.x = element_blank(),
+    legend.position = "none",
+    legend.title = element_text(size = 18, color = "black"),
+    legend.text = element_text(size = 18, color = "black"),
+    aspect.ratio = 1,
+    axis.line.y = element_line(color = "black"),
+    axis.ticks.y = element_line(color = "black"))+
+  guides(fill = "none")
+```
+
+Prepare the data for faunivory (foraging)
+
+```{r}
+for_bin_count <- behav %>%
+  filter(for_bin == 1) %>%  # Filter rows where for_bin == 1
+  group_by(Season, hour) %>%  # Group by Season and hour
+  summarise(count = n(), .groups = "drop") %>%  # Count the occurrences
+  left_join(
+    behav %>%
+      group_by(Season, hour) %>%
+      summarise(total_count = n(), .groups = "drop"),#Get total rows for hour
+    by = c("Season", "hour")
+  ) %>%
+  mutate(for_ratio = count / total_count)
+for_bin_count$Season <- factor(for_bin_count$Season, c("Rainy", "Dry"))
+
+fru_bin_count <- fru_bin_count %>%
+  left_join(for_bin_count %>% dplyr::select(Season, hour, for_ratio), 
+            by = c("Season", "hour"))
+
+head(fru_bin_count)
+```
+
+Check data distribution
+
+```{r}
+{layout="[1,1]"}
+boxcox(for_ratio ~ hour, data = fru_bin_count)
+boxcox(for_ratio ~ hour, data = fru_bin_count, lambda = seq(0, 3, 0.1))
+```
+
+```{r}
+shapiro.test(fru_bin_count$for_ratio^1.5)
+```
+
+Fit a gam model for faunivory
+
+```{r}
+summary(gam_foraging <- gam(for_ratio^1.5 ~ s(hour, by = Season),
+                    method = "REML",
+                    data = fru_bin_count))
+```
+
+```{r}
+gam.check(gam_foraging)
+```
+
+```{r}
+plotQQunif(gam_foraging)
+```
+
+Generate a new data frame for predictions for plotting
+
+```{r}
+newdata_foraging <-expand.grid(hour = seq(min(fru_bin_count$hour, na.rm = TRUE), 
+                                          max(fru_bin_count$hour, na.rm = TRUE), 
+                                          length.out = 100),
+                               Season = levels(fru_bin_count$Season))
+
+# Generate predictions from the GAM model
+predictions_foraging <- predict(gam_foraging, newdata = newdata_foraging, 
+                                type = "response", se.fit = TRUE)
+
+# Add predictions and confidence intervals to the new data
+newdata_foraging <- newdata_foraging %>%
+  mutate(predicted = predictions_foraging$fit,
+         lwr = predictions_foraging$fit - 1.96 * predictions_foraging$se.fit,
+         upr = predictions_foraging$fit + 1.96 * predictions_foraging$se.fit)
+```
+
+Create the plot
+
+```{r}
+p_foraging <- ggplot() +
+  # Add predicted line and ribbon for each Season
+  geom_line(data = newdata_foraging,
+            aes(x = hour, y = predicted, color = Season, linetype = Season),
+            size = 1) +
+  geom_ribbon(data = newdata_foraging,
+              aes(x = hour, ymin = lwr, ymax = upr, fill = Season),
+              alpha = 0.2, color = NA) +
+  # Add observed points
+  geom_point(data = fru_bin_count,
+             aes(x = hour, y = for_ratio^1.5, color = Season),
+             shape = 16, size = 2, alpha = 0.4) +
+  # Labels and scales
+  labs(x = "Time of the day", y = "(Proportion of faunivory/hour)^1.5") +
+  scale_color_manual(values = c("Rainy" = "grey20", "Dry" = "indianred3")) +
+  scale_fill_manual(values = c("Rainy" = "grey20", "Dry" = "indianred3")) +
+  scale_linetype_manual(values = c("Rainy" = "solid", "Dry" = "solid")) +
+  theme_classic() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(size = 15, color = "black"),
+    axis.text.x = element_text(size = 15, color = "black"),
+    axis.title.y = element_text(size = 20),
+    axis.title.x = element_text(size = 20),
+    legend.position = "bottom",
+    legend.title = element_text(size = 18, color = "black"),
+    legend.text = element_text(size = 18, color = "black"),
+    aspect.ratio = 1,
+    axis.line.y = element_line(color = "black"),
+    axis.ticks.y = element_line(color = "black"))+
+  guides(fill = "none")
+```
+
+Create the figure with both plots in the same page
+
+```{r}
+#tiff("model_frufor_2024_12_d06.tiff", width = 11000, height = 6500, res = 1000)
+p<- p_fru_bin + p_foraging
+p 
+#dev.off()
+```
+
+H4 – The recharge hypothesis: After a prolonged overnight fast, frugivores often seek out energy-dense foods to rapidly restore energy balance. In primates, this early-morning “recharging” has been linked to strategic foraging, such as the planning of breakfast time, type, and location observed in wild chimpanzees [@janmaat2014]. Consequently, we expected BLTs to prioritize the consumption of fruits with higher energetic content early morning than in the rest of the day. Thus, we predicted a higher proportion of scans in fruits with higher energetic content in the morning, after spending the night at a sleeping site, while the consumption of fruits with lower energy values to be constant along the day.
+
+I will compute, first, the proportion of frugivory on each fruit, out of the number of scans on each hour.
+
+```{r}
+total_counts <- behav %>%
+  count(Season, hour, name = "total_count")
+
+# Calculate fru_count and proportion
+fru_count <- behav %>%
+  filter(sp != "" & !is.na(sp)) %>%
+  group_by(sp, Season, hour) %>%
+  summarise(fru_count = sum(fru_bin == 1), .groups = "drop") %>%
+  left_join(total_counts, by = c("Season", "hour")) %>%
+  mutate(proportion = fru_count / total_count)
+head(fru_count)
+
+# Merge fru_count with energy_df (the data frame with energetic content)
+fru_count <- fru_count %>%
+  left_join(energy_df %>% dplyr::select(sp, KJ), by = c("sp"))
+fru_count <- fru_count %>%
+  filter(!is.na(KJ))
+
+fru_count$Season <- factor(fru_count$Season, levels = c("Rainy", "Dry"))
+fru_count$hour <- as.numeric(fru_count$hour)
+
+# View the result
+head(fru_count)
+```
+
+Apply logit transformation to proportion before fiting the model
+
+```{r}
+fru_count$logit_proportion<-log(fru_count$proportion/(1 - fru_count$proportion))
+```
+
+Fit the model
+
+```{r}
+summary(gam_propfru_hour <- gam(logit_proportion ~ s(hour, by = KJ, k = 12), 
+                                method = "REML", data = fru_count))
+```
+
+```{r}
+gam.check(gam_propfru_hour)
+```
+
+```{r}
+plotQQunif(gam_propfru_hour)
+```
+
+Create a dataframe with predictions from the model for plotting
+
+```{r}
+# Create a complete grid of hour and KJ
+complete_grid <- expand.grid(
+  hour = seq(min(fru_count$hour), max(fru_count$hour), by = 1),
+  KJ = round(unique(fru_count$KJ), 2),  
+  Season = unique(fru_count$Season))
+
+# Add predictions for the complete grid
+predictions <- predict(gam_propfru_hour, newdata = complete_grid, 
+                       type = "terms", se.fit = TRUE)
+full_predictions <- predict(gam_propfru_hour, newdata = complete_grid, 
+                            type = "link", se.fit = TRUE)
+
+# Combine predictions with the complete grid and remove NAs
+complete_grid_clean <- complete_grid %>%
+  mutate(
+    adjusted_smooth_effect = predictions$fit[, "s(hour):KJ"] + 
+      (full_predictions$fit - rowSums(predictions$fit)),
+    se_adjusted = predictions$se.fit[, "s(hour):KJ"]
+  ) %>%
+  filter(!is.na(adjusted_smooth_effect))
+
+# Order KJ values
+complete_grid_clean$KJ <-factor(complete_grid_clean$KJ, 
+                                levels = sort(unique(complete_grid_clean$KJ)))
+
+# Generate a color palette with ordered KJ levels
+KJ_palette <- setNames(
+  colorRampPalette(c("#EBEB8F", "#2CC4C9"))(length(
+    levels(complete_grid_clean$KJ))),
+  levels(complete_grid_clean$KJ))
+```
+
+Plot
+
+```{r}
+p1 <- ggplot(complete_grid_clean, aes(x = hour, y = adjusted_smooth_effect, 
+                                      color = factor(KJ))) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(
+    ymin = adjusted_smooth_effect - 2 * se_adjusted,
+    ymax = adjusted_smooth_effect + 2 * se_adjusted,
+    fill = factor(KJ)
+  ), alpha = 0.1, color = NA) +
+  scale_color_manual(values = KJ_palette, name = "Fruit energy") +
+  scale_fill_manual(values = KJ_palette, name = "Fruit energy") +
+  labs(x = "Time of the day (h)", y = "logit(Proportion of frugivory per fruit/hour)") +
+  theme_classic() +
+  theme(
+    axis.text = element_text(size = 16, color = "black"),
+    axis.title.x = element_text(size = 20),
+    axis.title.y = element_text(size = 20),
+    legend.position = "right",
+    aspect.ratio = 1,
+    panel.grid = element_blank(),
+    axis.line.y = element_line(color = "black"),
+    axis.ticks.y = element_line(color = "black"),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 14)) +
+  guides(color = guide_legend(reverse = TRUE), 
+         fill = guide_legend(reverse = TRUE))
+#tiff("model_frugivory_KJ_2025_01_d24.tiff", width = 11000, height = 6500, res = 1000)
+p1
+#dev.off()
+```
+
+Based on our model, there is a tendency for BLTs to consume more the fruits with higher energetic content on the early hours of the day, while the is no temporal pattern to distinguish a period of the day with higher consumption of fruits with lower energy content.
